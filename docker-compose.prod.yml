@@ -1,0 +1,30 @@
+# Production docker-compose
+# Usage: docker-compose -f docker-compose.prod.yml up -d
+#
+# NOTE: In production, Postgres and Redis are typically managed services
+# (Railway, Supabase, Upstash, AWS RDS, etc.) — NOT run as containers.
+# This file only runs the backend + worker, and reads DATABASE_URL / REDIS_URL
+# from .env.production which points to those external services.
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env.production
+    volumes:
+      - uploads_data:/app/uploads
+    restart: always
+
+  worker:
+    build: ./backend
+    command: python worker.py
+    env_file:
+      - ./backend/.env.production
+    volumes:
+      - uploads_data:/app/uploads
+    restart: always
+
+volumes:
+  uploads_data:

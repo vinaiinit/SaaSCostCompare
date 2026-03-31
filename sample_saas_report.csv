@@ -1,0 +1,36 @@
+tool,category,cost,billing_cycle,users,notes
+Slack,Productivity,18000,annual,150,Team messaging
+Microsoft 365,Productivity,21600,annual,150,Office suite + email
+Zoom,Productivity,9000,annual,150,Video conferencing
+Notion,Productivity,4800,annual,80,Documentation & wikis
+Salesforce,CRM,54000,annual,40,CRM & sales pipeline
+HubSpot,CRM,14400,annual,10,Marketing CRM
+Zendesk,Customer Support,12000,annual,20,Support ticketing
+Intercom,Customer Support,9600,annual,1,In-app messaging
+GitHub,DevTools,4800,annual,60,Code hosting & CI
+Jira,DevTools,7200,annual,60,Project & issue tracking
+Datadog,DevTools,24000,annual,1,Monitoring & observability
+Sentry,DevTools,3600,annual,1,Error tracking
+Figma,Design,6000,annual,15,UI/UX design
+Miro,Design,2400,annual,30,Whiteboarding
+AWS,Infrastructure,96000,annual,1,Cloud infrastructure
+Snowflake,Data & Analytics,36000,annual,1,Data warehouse
+Looker,Data & Analytics,24000,annual,25,Business intelligence
+Segment,Data & Analytics,12000,annual,1,Customer data platform
+Workday,HR,18000,annual,1,HR & payroll
+Greenhouse,HR,8400,annual,1,Applicant tracking
+Lattice,HR,6000,annual,120,Performance management
+Okta,Security,9600,annual,150,Identity & SSO
+1Password,Security,2400,annual,150,Password management
+Cloudflare,Security,6000,annual,1,CDN & DDoS protection
+Stripe,Finance,0,usage,1,Payment processing (usage-based)
+Expensify,Finance,3600,annual,60,Expense management
+QuickBooks,Finance,1800,annual,5,Accounting
+Mailchimp,Marketing,4800,annual,1,Email marketing
+SEMrush,Marketing,3600,annual,5,SEO & marketing analytics
+Canva,Marketing,1200,annual,20,Graphic design
+Loom,Productivity,2400,annual,50,Async video messaging
+Calendly,Productivity,1800,annual,30,Meeting scheduling
+Dropbox,Productivity,3600,annual,50,File storage & sharing
+DocuSign,Operations,4800,annual,20,E-signatures
+Twilio,Operations,6000,annual,1,SMS & communications API

@@ -1,0 +1,7 @@
+vendor,product_name,sku,sku_description,quantity,unit_price,total_cost,billing_frequency,currency,contract_start_date,contract_end_date,notes
+Microsoft,Microsoft 365 E3,CFQ7TTC0LF8R-0001,Microsoft 365 E3 - per user per month,500,36.00,18000.00,Monthly,USD,2024-01-01,2024-12-31,Enterprise Agreement
+Microsoft,Azure DevOps,CFQ7TTC0K5D8-0002,Azure DevOps Basic Plan - per user per month,200,6.00,1200.00,Monthly,USD,2024-01-01,2024-12-31,
+Salesforce,Sales Cloud Enterprise,SFDC-SCE-001,Salesforce Sales Cloud Enterprise Edition - per user per month,150,150.00,22500.00,Monthly,USD,2024-03-01,2025-02-28,Renewal due Feb 2025
+Salesforce,Tableau Creator,TC-CREATOR-001,Tableau Creator License - per user per month,50,70.00,3500.00,Monthly,USD,2024-03-01,2025-02-28,
+AWS,EC2 Reserved Instances,AWS-EC2-RI-M5,EC2 M5 Large Reserved Instance - 1 year,20,69.00,1380.00,Monthly,USD,2024-06-01,2025-05-31,1-year reserved
+AWS,S3 Storage,AWS-S3-STD,S3 Standard Storage - per TB per month,10,23.00,230.00,Monthly,USD,2024-01-01,,Usage-based estimate
