@@ -255,6 +255,9 @@ export default function Login() {
       </section>
 
 
+      {/* ── INSIGHTS / WHY US ── */}
+      <InsightsCarousel />
+
       {/* ── ABOUT ── */}
       <section id="about" className="py-24 bg-white">
         <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-16 items-center">
@@ -401,9 +404,6 @@ export default function Login() {
           </div>
         </div>
       </section>
-
-      {/* ── INSIGHTS / WHY US ── */}
-      <InsightsCarousel />
 
       {/* ── CTA ── */}
       <section className="py-20 bg-white border-t border-slate-100">
