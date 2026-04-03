@@ -62,6 +62,8 @@ export const reportAPI = {
     api.get(`/download/${reportId}`, { responseType: 'blob' }),
   downloadFullReport: (reportId) =>
     api.get(`/download/${reportId}/full-report`, { responseType: 'blob' }),
+  markPaid: (reportId) =>
+    api.post(`/reports/${reportId}/mark-paid`),
   generateBenchmark: (reportId) =>
     api.post(`/reports/${reportId}/benchmark`),
   getBenchmark: (reportId) =>

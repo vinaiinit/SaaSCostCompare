@@ -151,6 +151,21 @@ def get_current_user(
     return user
 
 
+# --- Test/Dev: Mark report as paid (bypass Stripe) ---
+@app.post("/reports/{report_id}/mark-paid")
+def mark_report_paid(
+    report_id: str,
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    report = db.query(Report).filter(Report.id == report_id).first()
+    if not report or report.owner_id != user_id:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report.payment_status = "completed"
+    db.commit()
+    return {"message": "Report marked as paid", "payment_status": "completed"}
+
+
 # --- Report endpoints ---
 VALID_CATEGORIES = {"AWS", "Microsoft", "Google", "Salesforce", "Pega", "SAP"}
 

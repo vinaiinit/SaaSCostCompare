@@ -456,13 +456,28 @@ function ReportCard({ report }) {
 
       <div className="flex flex-wrap gap-2">
         {status.status === 'completed' && status.payment_status === 'pending' && (
-          <button
-            onClick={handlePay}
-            disabled={loading}
-            className="btn-primary flex-1 disabled:opacity-50"
-          >
-            {loading ? 'Processing...' : 'Pay $99.99 for Report'}
-          </button>
+          <>
+            <button
+              onClick={handlePay}
+              disabled={loading}
+              className="btn-primary flex-1 disabled:opacity-50"
+            >
+              {loading ? 'Processing...' : 'Pay $99.99 for Report'}
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  await reportAPI.markPaid(report.id);
+                  setStatus((prev) => ({ ...prev, payment_status: 'completed' }));
+                } catch (err) {
+                  alert('Failed: ' + (err.response?.data?.detail || 'Unknown error'));
+                }
+              }}
+              className="btn-secondary text-sm text-orange-600 border-orange-300 hover:bg-orange-50"
+            >
+              Mark as Paid (Test)
+            </button>
+          </>
         )}
         {status.status === 'completed' && status.payment_status === 'completed' && (
           <button
