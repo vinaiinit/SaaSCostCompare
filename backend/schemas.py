@@ -51,6 +51,15 @@ class TokenResponse(BaseModel):
     token_type: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
 class ReportResponse(BaseModel):
     id: str
     org_id: int

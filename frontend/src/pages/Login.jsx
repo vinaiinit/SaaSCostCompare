@@ -232,7 +232,13 @@ export default function Login() {
               </button>
             </form>
 
-            <p className="text-center text-sm text-slate-500 mt-5">
+            <div className="text-center mt-4">
+              <Link to="/forgot-password" className="text-sm text-[#003366] font-medium hover:underline">
+                Forgot your password?
+              </Link>
+            </div>
+
+            <p className="text-center text-sm text-slate-500 mt-3">
               New to SaaSCostCompare?{' '}
               <Link to="/register" className="text-[#003366] font-semibold hover:underline">
                 Create an account

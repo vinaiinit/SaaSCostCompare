@@ -426,8 +426,7 @@ function ReportCard({ report }) {
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <span className={`badge ${
+        <span className={`badge ${
             status.status === 'completed'
               ? 'badge-success'
               : status.status === 'processing'
@@ -436,14 +435,6 @@ function ReportCard({ report }) {
           }`}>
             {status.status.charAt(0).toUpperCase() + status.status.slice(1)}
           </span>
-          <span className={`badge ${
-            status.payment_status === 'completed'
-              ? 'badge-success'
-              : 'badge-pending'
-          }`}>
-            {status.payment_status === 'completed' ? 'Paid' : 'Pending'}
-          </span>
-        </div>
       </div>
 
       {status.analysis && (
@@ -455,62 +446,44 @@ function ReportCard({ report }) {
       )}
 
       <div className="flex flex-wrap gap-2">
-        {status.status === 'completed' && status.payment_status === 'pending' && (
-          <>
-            <button
-              onClick={handlePay}
-              disabled={loading}
-              className="btn-primary flex-1 disabled:opacity-50"
-            >
-              {loading ? 'Processing...' : 'Pay $99.99 for Report'}
-            </button>
-            <button
-              onClick={async () => {
-                try {
-                  await reportAPI.markPaid(report.id);
-                  setStatus((prev) => ({ ...prev, payment_status: 'completed' }));
-                } catch (err) {
-                  alert('Failed: ' + (err.response?.data?.detail || 'Unknown error'));
-                }
-              }}
-              className="btn-secondary text-sm text-orange-600 border-orange-300 hover:bg-orange-50"
-            >
-              Mark as Paid (Test)
-            </button>
-          </>
-        )}
-        {status.status === 'completed' && status.payment_status === 'completed' && (
-          <button
-            onClick={handleDownload}
-            disabled={loading}
-            className="btn-primary flex-1 disabled:opacity-50"
-          >
-            {loading ? 'Downloading...' : 'Download Report'}
-          </button>
-        )}
         {status.status === 'processing' && (
           <div className="flex-1 flex items-center justify-center gap-2 text-slate-600">
             <div className="animate-spin w-4 h-4 border-2 border-primary-600 border-t-transparent rounded-full"></div>
             <span>Analyzing with AI...</span>
           </div>
         )}
-        {status.status === 'completed' && (
+        {status.status === 'completed' && !benchmark && (
           <button
-            onClick={benchmark ? () => setShowBenchmark(!showBenchmark) : handleGenerateBenchmark}
+            onClick={handleGenerateBenchmark}
             disabled={benchmarking}
-            className="btn-secondary disabled:opacity-50 flex items-center gap-2"
+            className="btn-primary flex-1 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {benchmarking ? (
               <>
-                <div className="animate-spin w-4 h-4 border-2 border-slate-600 border-t-transparent rounded-full"></div>
-                Benchmarking...
+                <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                Generating Benchmark...
               </>
-            ) : benchmark ? (
-              showBenchmark ? 'Hide Benchmark' : 'View Benchmark Report'
             ) : (
               'Generate Benchmark Report'
             )}
           </button>
+        )}
+        {status.status === 'completed' && benchmark && (
+          <>
+            <button
+              onClick={handleDownload}
+              disabled={loading}
+              className="btn-primary flex-1 disabled:opacity-50"
+            >
+              {loading ? 'Downloading...' : 'Download PDF Report'}
+            </button>
+            <button
+              onClick={() => setShowBenchmark(!showBenchmark)}
+              className="btn-secondary disabled:opacity-50 flex items-center gap-2"
+            >
+              {showBenchmark ? 'Hide Benchmark' : 'View Benchmark'}
+            </button>
+          </>
         )}
       </div>
 

@@ -32,6 +32,10 @@ export const authAPI = {
     api.post('/login', { email, password }),
   getCurrentUser: () =>
     api.get('/me'),
+  forgotPassword: (email) =>
+    api.post('/forgot-password', { email }),
+  resetPassword: (token, newPassword) =>
+    api.post('/reset-password', { token, new_password: newPassword }),
 };
 
 export const orgAPI = {

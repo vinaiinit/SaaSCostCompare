@@ -13,7 +13,7 @@ import threading
 from pydantic import BaseModel
 
 from database import engine, get_db, Base
-from models import User, Organization, Report, BenchmarkReport
+from models import User, Organization, Report, BenchmarkReport, PasswordResetToken
 from auth import hash_password, verify_password, create_access_token, verify_token
 from schemas import (
     OrgCreate,
@@ -23,6 +23,8 @@ from schemas import (
     LoginRequest,
     TokenResponse,
     ReportResponse,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
 )
 import stripe
 from payment import create_payment_session, handle_stripe_webhook
@@ -149,6 +151,70 @@ def get_current_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+# --- Password reset endpoints ---
+@app.post("/forgot-password")
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    from email_utils import send_password_reset_email
+    import secrets
+    from datetime import datetime
+
+    # Always return success to avoid leaking whether email exists
+    user = db.query(User).filter(User.email == req.email).first()
+    if not user:
+        return {"message": "If that email exists, a reset link has been sent."}
+
+    # Invalidate any existing unused tokens for this user
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used == False,
+    ).update({"used": True})
+
+    # Create new token (expires in 1 hour)
+    token = secrets.token_urlsafe(48)
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token=token,
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(reset_token)
+    db.commit()
+
+    send_password_reset_email(user.email, token)
+    return {"message": "If that email exists, a reset link has been sent."}
+
+
+@app.post("/reset-password")
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    from datetime import datetime
+
+    reset_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token == req.token,
+        PasswordResetToken.used == False,
+    ).first()
+
+    if not reset_token:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+
+    if reset_token.expires_at < datetime.utcnow():
+        reset_token.used = True
+        db.commit()
+        raise HTTPException(status_code=400, detail="Reset link has expired. Please request a new one.")
+
+    if len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+
+    user = db.query(User).filter(User.id == reset_token.user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found.")
+
+    user.hashed_password = hash_password(req.new_password)
+    reset_token.used = True
+    db.commit()
+
+    return {"message": "Password has been reset successfully. You can now sign in."}
+
 
 
 # --- Test/Dev: Mark report as paid (bypass Stripe) ---
@@ -418,8 +484,6 @@ def download_report(
     report = db.query(Report).filter(Report.id == report_id).first()
     if not report or report.owner_id != user_id:
         raise HTTPException(status_code=404, detail="Report not found")
-    if report.payment_status != "completed":
-        raise HTTPException(status_code=403, detail="Payment required")
     if not os.path.exists(report.file_path):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(report.file_path, filename=report.filename)
@@ -436,8 +500,6 @@ def download_full_report(
     report = db.query(Report).filter(Report.id == report_id).first()
     if not report or report.owner_id != user_id:
         raise HTTPException(status_code=404, detail="Report not found")
-    if report.payment_status != "completed":
-        raise HTTPException(status_code=403, detail="Payment required")
 
     org = db.query(Organization).filter(Organization.id == report.org_id).first()
     benchmark = db.query(BenchmarkReport).filter(BenchmarkReport.report_id == report_id).first()
