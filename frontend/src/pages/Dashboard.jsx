@@ -426,24 +426,13 @@ function ReportCard({ report }) {
             </p>
           </div>
         </div>
-        <span className={`badge ${
-            status.status === 'completed'
-              ? 'badge-success'
-              : status.status === 'processing'
-              ? 'badge-pending'
-              : 'badge-error'
-          }`}>
-            {status.status.charAt(0).toUpperCase() + status.status.slice(1)}
-          </span>
+        {status.status === 'processing' && (
+          <span className="badge badge-pending">Processing</span>
+        )}
+        {status.status === 'failed' && (
+          <span className="badge badge-error">Failed</span>
+        )}
       </div>
-
-      {status.analysis && (
-        <div className="mb-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
-          <p className="text-sm text-slate-600 whitespace-pre-line line-clamp-4">
-            {typeof status.analysis === 'string' ? status.analysis : status.analysis.analysis}
-          </p>
-        </div>
-      )}
 
       <div className="flex flex-wrap gap-2">
         {status.status === 'processing' && (
@@ -488,13 +477,13 @@ function ReportCard({ report }) {
       </div>
 
       {showBenchmark && benchmark && (
-        <BenchmarkPanel benchmark={benchmark} onRegenerate={handleGenerateBenchmark} benchmarking={benchmarking} />
+        <BenchmarkPanel benchmark={benchmark} />
       )}
     </div>
   );
 }
 
-function BenchmarkPanel({ benchmark, onRegenerate, benchmarking }) {
+function BenchmarkPanel({ benchmark }) {
   const formatCurrency = (n) =>
     n != null ? `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—';
   const formatPct = (n) => (n != null ? `${Number(n).toFixed(1)}%` : '—');
@@ -517,9 +506,12 @@ function BenchmarkPanel({ benchmark, onRegenerate, benchmarking }) {
           </h2>
         );
       }
-      if (line.startsWith('| ')) {
+      if (line.includes('|')) {
+        // Skip separator lines like |---|---|---|
+        if (/^[\s|:-]+$/.test(line)) return null;
         // Table row — render as a styled div
         const cells = line.split('|').filter((c) => c.trim() !== '');
+        if (cells.length === 0) return null;
         const isSeparator = cells.every((c) => /^[-: ]+$/.test(c));
         if (isSeparator) return null;
         return (
@@ -565,13 +557,6 @@ function BenchmarkPanel({ benchmark, onRegenerate, benchmarking }) {
             {benchmark.generated_at && ` · Generated ${new Date(benchmark.generated_at).toLocaleString()}`}
           </p>
         </div>
-        <button
-          onClick={onRegenerate}
-          disabled={benchmarking}
-          className="text-xs text-primary-600 hover:underline disabled:opacity-50"
-        >
-          {benchmarking ? 'Regenerating...' : 'Regenerate'}
-        </button>
       </div>
 
       {/* Key metrics strip */}

@@ -47,17 +47,24 @@ billing_frequency, currency, contract_start_date, contract_end_date, notes.
 
 Organisation Profile:
 - Name: {org_profile.get('name')}
-- Domain: {org_profile.get('domain')}
+- Industry: {org_profile.get('domain')}
 - Annual Revenue: ${org_profile.get('revenue', 0):,.0f}
 - Employees: {org_profile.get('size', 0)}
 
 SaaS Spend Data:
 {json.dumps(report_data, indent=2)}
 
+IMPORTANT RULES:
+- ONLY analyze the data that has been provided. Do NOT infer or assume spend on categories not present in the data.
+- Do NOT state that spend on unmentioned categories (HR software, Finance software, etc.) is zero — simply do not mention them.
+- Do NOT guess or infer what type of business the organisation is based on its name. Only use the Industry field provided above.
+- Do NOT name any public sources, research firms, websites, or reports (e.g., Gartner, Forrester, Blissfully, Vendr). Present all benchmarks as "industry benchmarks" without attribution.
+- This data represents only the uploaded vendor's spend, NOT the organisation's total SaaS spend. Do not treat it as total SaaS spend.
+
 Please provide:
-1. Total spend and per-employee cost
+1. Total spend from the uploaded data and per-employee cost for this vendor
 2. Top 5 most expensive SKUs by total_cost
-3. Spend breakdown by vendor
+3. Spend breakdown by product/SKU
 4. Any SKUs with unusually high unit_price or quantity relative to the organisation's size
 5. Contracts expiring within 90 days (use contract_end_date)
 6. Immediate optimisation recommendations (consolidation, tier downgrades, etc.)
@@ -127,50 +134,56 @@ def generate_benchmark_report(
     else:
         peer_section = (
             "\n\nNo peer organizations found in database with similar revenue/size. "
-            "Use your expert knowledge of SaaS spending benchmarks for the industry inferred from the org's domain and name."
+            "Use industry benchmarks for similar-sized organizations."
         )
 
-    prompt = f"""You are a SaaS cost benchmarking expert. Generate a detailed benchmarking report comparing this organization's SaaS spending against industry peers.
+    prompt = f"""You are a SaaS cost benchmarking expert. Generate a detailed benchmarking report comparing this organization's vendor-specific SaaS spending against industry peers.
+
+IMPORTANT: This data represents ONLY the organization's spend with one specific vendor, NOT their total SaaS spend across all vendors. All analysis must be scoped to this vendor's data only.
 
 TARGET ORGANIZATION:
 - Name: {target_org.get("name")}
-- Domain: {target_org.get("domain")}
+- Industry: {target_org.get("domain")}
 - Annual Revenue: ${revenue:,.0f}
 - Employees: {employees}
-- Total SaaS Spend: ${total_spend:,.0f}
-- SaaS Spend per Employee: ${spend_per_employee:,.0f}
-- SaaS as % of Revenue: {spend_pct_revenue:.2f}%
+- Vendor Spend (uploaded data): ${total_spend:,.0f}
+- Vendor Spend per Employee: ${spend_per_employee:,.0f}
+- Vendor Spend as % of Revenue: {spend_pct_revenue:.2f}%
 
-TARGET ORG SAAS SPEND DATA:
+TARGET ORG VENDOR SPEND DATA:
 {json.dumps(target_data, indent=2)[:3000]}
 {peer_section}
+
+IMPORTANT RULES:
+- ONLY analyze the data that has been provided. Do NOT infer or assume spend on categories or products not present in the uploaded data.
+- Do NOT state that spend on unmentioned categories (HR software, Finance software, Security, etc.) is zero or missing. Only comment on what is in the data.
+- Do NOT guess or infer what type of business the organisation is based on its name. Only use the Industry field provided above.
+- Do NOT name any public sources, research firms, websites, or reports (e.g., Gartner, Forrester, Blissfully, Vendr, IDC). Present all benchmarks as "industry benchmarks" without attribution.
+- Do NOT use markdown table separator lines (|---|---|---|). Use clean table formatting only.
+- Frame all spend figures as "vendor spend" not "total SaaS spend" since this is only one vendor's data.
 
 Generate a comprehensive benchmarking report with EXACTLY these sections:
 
 ## Executive Summary
-2-3 sentence overview of how this org compares to peers. Include a clear verdict (e.g., "above average spender", "well-optimized", "under-invested in key areas").
+2-3 sentence overview of how this org's spend with this vendor compares to peers. Include a clear verdict (e.g., "above average spender", "well-optimized").
 
 ## Spend Benchmarks
-| Metric | This Org | Industry Benchmark | Assessment |
-|--------|----------|-------------------|------------|
-| SaaS per employee | ${spend_per_employee:,.0f} | [typical range] | [rating] |
-| SaaS % of revenue | {spend_pct_revenue:.1f}% | [typical range] | [rating] |
-| Total SaaS tools | [count] | [typical range] | [rating] |
+Compare this org's vendor spend metrics against industry benchmarks for similar-sized organizations. Include vendor spend per employee, vendor spend as % of revenue, and number of SKUs/products.
 
-## Category Breakdown & Benchmarks
-For each spending category present in the data (Productivity, CRM, DevTools, HR, Security, Marketing, etc.):
-- This org's spend and % of total
-- Industry benchmark for this category (for similar size/revenue)
-- Assessment: Under-invested / On-target / Over-spending
+## Product/SKU Breakdown & Benchmarks
+For each product or SKU category present in the uploaded data:
+- This org's spend and % of total vendor spend
+- Industry benchmark for this product/SKU (for similar size/revenue)
+- Assessment: On-target / Over-spending / Under-utilized
 
 ## Tool-Level Analysis
-Top tools by spend with benchmark context. Flag any tools that appear redundant, overpriced, or where a cheaper alternative exists.
+Top products/SKUs by spend with benchmark context. Flag any that appear redundant, overpriced, or where optimization is possible.
 
 ## Percentile Ranking
-Provide an estimated percentile ranking for overall SaaS spend efficiency (e.g., "65th percentile — you spend more than 65% of similar organizations"). Explain the ranking.
+Provide an estimated percentile ranking for this vendor's spend efficiency (e.g., "65th percentile — you spend more than 65% of similar organizations with this vendor"). Explain the ranking.
 
 ## Key Findings
-3-5 specific, data-backed findings. Be precise with numbers.
+3-5 specific, data-backed findings. Be precise with numbers. Only reference data that was uploaded.
 
 ## Prioritized Recommendations
 Numbered list of specific actions, ordered by potential savings impact. Include estimated savings where possible.

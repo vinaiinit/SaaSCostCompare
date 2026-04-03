@@ -111,42 +111,72 @@ export default function Register() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Industry Domain</label>
-                <input
-                  type="text"
+                <label className="block text-sm font-medium text-slate-700 mb-2">Industry</label>
+                <select
                   value={domain}
                   onChange={(e) => setDomain(e.target.value)}
                   className="input-field"
-                  placeholder="e.g., Technology, Finance"
                   required
                   disabled={loading}
-                />
+                >
+                  <option value="">Select industry</option>
+                  {['Technology', 'Financial Services', 'Healthcare', 'Manufacturing', 'Retail & E-Commerce', 'Media & Entertainment', 'Education', 'Government & Public Sector', 'Energy & Utilities', 'Telecommunications', 'Professional Services', 'Real Estate', 'Transportation & Logistics', 'Non-Profit', 'Other'].map((ind) => (
+                    <option key={ind} value={ind}>{ind}</option>
+                  ))}
+                </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Annual Revenue ($)</label>
-                <input
-                  type="number"
+                <label className="block text-sm font-medium text-slate-700 mb-2">Annual Revenue (USD)</label>
+                <select
                   value={revenue}
                   onChange={(e) => setRevenue(e.target.value)}
                   className="input-field"
-                  placeholder="1000000"
                   required
                   disabled={loading}
-                />
+                >
+                  <option value="">Select revenue range</option>
+                  {[
+                    { label: 'Under $1M', value: 500000 },
+                    { label: '$1M – $5M', value: 3000000 },
+                    { label: '$5M – $10M', value: 7500000 },
+                    { label: '$10M – $25M', value: 17500000 },
+                    { label: '$25M – $50M', value: 37500000 },
+                    { label: '$50M – $100M', value: 75000000 },
+                    { label: '$100M – $250M', value: 175000000 },
+                    { label: '$250M – $500M', value: 375000000 },
+                    { label: '$500M – $1B', value: 750000000 },
+                    { label: 'Over $1B', value: 1500000000 },
+                  ].map(({ label, value }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Number of Employees</label>
-                <input
-                  type="number"
+                <select
                   value={size}
                   onChange={(e) => setSize(e.target.value)}
                   className="input-field"
-                  placeholder="100"
                   required
                   disabled={loading}
-                />
+                >
+                  <option value="">Select company size</option>
+                  {[
+                    { label: '1 – 10', value: 5 },
+                    { label: '11 – 50', value: 30 },
+                    { label: '51 – 200', value: 125 },
+                    { label: '201 – 500', value: 350 },
+                    { label: '501 – 1,000', value: 750 },
+                    { label: '1,001 – 5,000', value: 3000 },
+                    { label: '5,001 – 10,000', value: 7500 },
+                    { label: '10,001 – 50,000', value: 30000 },
+                    { label: 'Over 50,000', value: 75000 },
+                  ].map(({ label, value }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
               </div>
 
               {loading && (
