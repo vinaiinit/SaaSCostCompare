@@ -76,3 +76,14 @@ class PasswordResetToken(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User")
+
+
+class ContactInquiry(Base):
+    __tablename__ = "contact_inquiries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    email = Column(String)
+    company = Column(String)
+    message = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)

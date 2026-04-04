@@ -13,7 +13,7 @@ import threading
 from pydantic import BaseModel
 
 from database import engine, get_db, Base
-from models import User, Organization, Report, BenchmarkReport, PasswordResetToken
+from models import User, Organization, Report, BenchmarkReport, PasswordResetToken, ContactInquiry
 from auth import hash_password, verify_password, create_access_token, verify_token
 from schemas import (
     OrgCreate,
@@ -473,6 +473,29 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+# --- Contact form ---
+class ContactRequest(BaseModel):
+    name: str
+    email: str
+    company: str
+    message: str
+
+
+@app.post("/contact")
+def submit_contact(req: ContactRequest, db: Session = Depends(get_db)):
+    if not req.name.strip() or not req.email.strip() or not req.message.strip():
+        raise HTTPException(status_code=400, detail="Name, email, and message are required.")
+    inquiry = ContactInquiry(
+        name=req.name.strip(),
+        email=req.email.strip(),
+        company=req.company.strip(),
+        message=req.message.strip(),
+    )
+    db.add(inquiry)
+    db.commit()
+    return {"message": "Thank you for reaching out. We'll get back to you shortly."}
 
 
 @app.get("/download/{report_id}")

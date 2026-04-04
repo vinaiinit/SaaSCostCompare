@@ -74,4 +74,9 @@ export const reportAPI = {
     api.get(`/reports/${reportId}/benchmark`),
 };
 
+export const contactAPI = {
+  submit: (name, email, company, message) =>
+    api.post('/contact', { name, email, company, message }),
+};
+
 export default api;
