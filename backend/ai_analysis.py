@@ -277,13 +277,16 @@ def process_report(report_id: str, file_path: str, org_id: int, db: Session):
         analysis = analyze_with_claude(report_data, org_profile)
 
         # Store results
+        warnings = report_data.get("warnings", [])
         report.comparison_result = json.dumps(
             {
                 "analysis": analysis,
                 "data_summary": {
                     "item_count": len(report_data.get("items", [])),
                     "analysis_date": str(datetime.now()),
+                    "file_summary": report_data.get("file_summary", ""),
                 },
+                "warnings": warnings,
             }
         )
         report.status = "completed"

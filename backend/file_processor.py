@@ -76,6 +76,7 @@ def process_uploaded_files(file_paths: list) -> dict:
     all_items = []
     all_pdf_text = []
     file_names = []
+    warnings = []
 
     for path in file_paths:
         basename = os.path.basename(path)
@@ -88,14 +89,22 @@ def process_uploaded_files(file_paths: list) -> dict:
 
         elif lower.endswith(".pdf"):
             text = extract_text_from_pdf(path)
-            if text.strip():
+            stripped = text.strip()
+            if len(stripped) > 50:
                 all_pdf_text.append(f"--- Contents of {basename} ---\n{text}")
-                file_names.append(f"{basename} (PDF, {len(text)} chars)")
+                file_names.append(f"{basename} (PDF, {len(stripped)} chars)")
+            elif stripped:
+                # Very little text — likely scanned
+                all_pdf_text.append(f"--- Contents of {basename} ---\n{text}")
+                file_names.append(f"{basename} (PDF, low text - possibly scanned)")
+                warnings.append(f"{basename} appears to be a scanned document with very little extractable text. For best results, upload a text-based PDF or CSV.")
             else:
-                file_names.append(f"{basename} (PDF, no extractable text)")
+                file_names.append(f"{basename} (PDF, no extractable text - likely scanned)")
+                warnings.append(f"{basename} appears to be a scanned/image-based PDF. No text could be extracted. Please upload a text-based PDF or CSV instead.")
 
     return {
         "items": all_items,
         "pdf_text": "\n\n".join(all_pdf_text) if all_pdf_text else "",
         "file_summary": "; ".join(file_names) if file_names else "No files processed",
+        "warnings": warnings,
     }

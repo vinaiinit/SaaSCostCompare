@@ -348,12 +348,16 @@ def get_report_status(
     if not report or report.owner_id != user_id:
         raise HTTPException(status_code=404, detail="Report not found")
     
+    parsed = json.loads(report.comparison_result) if report.comparison_result else None
+    warnings = parsed.get("warnings", []) if parsed else []
+
     return {
         "id": report.id,
         "status": report.status,
         "category": report.category,
         "payment_status": report.payment_status,
-        "analysis": json.loads(report.comparison_result) if report.comparison_result else None,
+        "analysis": parsed,
+        "warnings": warnings,
     }
 
 
