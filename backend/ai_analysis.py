@@ -9,25 +9,44 @@ from models import Report, Organization, BenchmarkReport
 
 def read_saas_report(file_path: str) -> dict:
     """
-    Read and parse SaaS expense report (CSV/JSON).
-    Returns structured data: {software: cost, category, etc.}
+    Read and parse SaaS expense report from a file or directory.
+    Supports CSV, JSON, PDF files, and directories containing multiple files.
+    Returns: {"items": [...], "pdf_text": "...", "file_summary": "..."}
     """
-    data = {"items": []}
+    from file_processor import process_uploaded_files, parse_csv_to_items
+
+    # If it's a directory, process all files in it
+    if os.path.isdir(file_path):
+        all_files = []
+        for root, dirs, files in os.walk(file_path):
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                lower = fname.lower()
+                if lower.endswith((".csv", ".pdf", ".json")):
+                    all_files.append(fpath)
+        if all_files:
+            return process_uploaded_files(all_files)
+        return {"items": [], "pdf_text": "", "file_summary": "No supported files found"}
+
+    # Single file fallback (backwards compatible)
+    data = {"items": [], "pdf_text": "", "file_summary": ""}
 
     if file_path.endswith(".csv"):
-        try:
-            with open(file_path, "r") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    data["items"].append(row)
-        except Exception as e:
-            print(f"Error reading CSV: {e}")
+        data["items"] = parse_csv_to_items(file_path)
+        data["file_summary"] = f"{os.path.basename(file_path)} (CSV, {len(data['items'])} rows)"
     elif file_path.endswith(".json"):
         try:
             with open(file_path, "r") as f:
-                data = json.load(f)
+                loaded = json.load(f)
+                if isinstance(loaded, dict) and "items" in loaded:
+                    data["items"] = loaded["items"]
+                else:
+                    data["items"] = loaded if isinstance(loaded, list) else []
         except Exception as e:
             print(f"Error reading JSON: {e}")
+    elif file_path.endswith(".pdf"):
+        result = process_uploaded_files([file_path])
+        return result
 
     return data
 
@@ -38,12 +57,30 @@ def analyze_with_claude(report_data: dict, org_profile: dict) -> str:
     """
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+    # Build data section based on what's available
+    data_section = ""
+    items = report_data.get("items", [])
+    pdf_text = report_data.get("pdf_text", "")
+
+    if items:
+        data_section += f"Structured SaaS Spend Data (CSV):\n{json.dumps(items, indent=2)}\n"
+    if pdf_text:
+        data_section += f"\nContract/Document Text (extracted from PDF):\n{pdf_text[:8000]}\n"
+    if not items and not pdf_text:
+        data_section = "No data could be extracted from the uploaded files.\n"
+
+    file_summary = report_data.get("file_summary", "")
+
     prompt = f"""
 Analyze this organisation's SaaS spending data and provide insights.
 
-The data uses a standardised schema with columns:
+Files uploaded: {file_summary}
+
+If CSV data is present, it uses a standardised schema with columns:
 vendor, product_name, sku, sku_description, quantity, unit_price, total_cost,
 billing_frequency, currency, contract_start_date, contract_end_date, notes.
+
+If PDF/contract text is present, extract relevant pricing, SKU, and contract details from the text.
 
 Organisation Profile:
 - Name: {org_profile.get('name')}
@@ -51,8 +88,7 @@ Organisation Profile:
 - Annual Revenue: ${org_profile.get('revenue', 0):,.0f}
 - Employees: {org_profile.get('size', 0)}
 
-SaaS Spend Data:
-{json.dumps(report_data, indent=2)}
+{data_section}
 
 IMPORTANT RULES:
 - ONLY analyze the data that has been provided. Do NOT infer or assume spend on categories not present in the data.
@@ -60,14 +96,15 @@ IMPORTANT RULES:
 - Do NOT guess or infer what type of business the organisation is based on its name. Only use the Industry field provided above.
 - Do NOT name any public sources, research firms, websites, or reports (e.g., Gartner, Forrester, Blissfully, Vendr). Present all benchmarks as "industry benchmarks" without attribution.
 - This data represents only the uploaded vendor's spend, NOT the organisation's total SaaS spend. Do not treat it as total SaaS spend.
+- If data comes from PDFs, extract and summarize the key pricing and contract information before analyzing.
 
 Please provide:
 1. Total spend from the uploaded data and per-employee cost for this vendor
-2. Top 5 most expensive SKUs by total_cost
+2. Top 5 most expensive items/SKUs by cost
 3. Spend breakdown by product/SKU
-4. Any SKUs with unusually high unit_price or quantity relative to the organisation's size
-5. Contracts expiring within 90 days (use contract_end_date)
-6. Immediate optimisation recommendations (consolidation, tier downgrades, etc.)
+4. Any items with unusually high pricing relative to the organisation's size
+5. Key contract terms and dates (expiry, renewal windows)
+6. Immediate optimisation recommendations (consolidation, tier downgrades, renegotiation points)
 
 Format the response as clear, actionable insights using specific dollar amounts.
 """
@@ -151,7 +188,8 @@ TARGET ORGANIZATION:
 - Vendor Spend as % of Revenue: {spend_pct_revenue:.2f}%
 
 TARGET ORG VENDOR SPEND DATA:
-{json.dumps(target_data, indent=2)[:3000]}
+{json.dumps(target_data.get("items", []), indent=2)[:3000]}
+{("CONTRACT/DOCUMENT TEXT:" + chr(10) + target_data.get("pdf_text", "")[:3000]) if target_data.get("pdf_text") else ""}
 {peer_section}
 
 IMPORTANT RULES:

@@ -14,3 +14,4 @@ rq
 anthropic
 python-dotenv
 reportlab
+pdfplumber

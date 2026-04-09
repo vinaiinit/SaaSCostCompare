@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, status, Request
+from typing import List
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -64,7 +65,8 @@ app.add_middleware(
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB (to support multi-file and ZIP uploads)
+ALLOWED_EXTENSIONS = {".csv", ".pdf", ".zip"}
 
 REQUIRED_CSV_COLUMNS = {
     "vendor", "product_name", "sku", "quantity",
@@ -237,7 +239,7 @@ VALID_CATEGORIES = {"AWS", "Microsoft", "Google", "Salesforce", "Pega", "SAP"}
 
 @app.post("/upload")
 async def upload_report(
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...),
     category: str = Form(...),
     user_id: int = Depends(verify_token),
     db: Session = Depends(get_db),
@@ -249,24 +251,53 @@ async def upload_report(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB.")
-
-    if file.filename.endswith(".csv"):
-        validate_csv_columns(content)
-
     file_id = str(uuid.uuid4())
-    dest = os.path.join(UPLOAD_DIR, f"{file_id}_{file.filename}")
-    with open(dest, "wb") as buffer:
-        buffer.write(content)
+    report_dir = os.path.join(UPLOAD_DIR, file_id)
+    os.makedirs(report_dir, exist_ok=True)
+
+    saved_files = []
+    filenames = []
+    total_size = 0
+
+    for file in files:
+        content = await file.read()
+        total_size += len(content)
+        if total_size > MAX_FILE_SIZE:
+            raise HTTPException(status_code=400, detail="Total upload size too large. Maximum is 50MB.")
+
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {ext}. Allowed: CSV, PDF, ZIP",
+            )
+
+        dest = os.path.join(report_dir, file.filename)
+        with open(dest, "wb") as buffer:
+            buffer.write(content)
+        saved_files.append(dest)
+        filenames.append(file.filename)
+
+        # If ZIP, extract its contents into the report directory
+        if ext == ".zip":
+            from file_processor import process_zip
+            extracted = process_zip(dest, report_dir)
+            saved_files.extend(extracted)
+
+    # For single CSV uploads, validate columns
+    csv_files = [f for f in saved_files if f.lower().endswith(".csv")]
+    if len(saved_files) == 1 and len(csv_files) == 1:
+        with open(csv_files[0], "rb") as f:
+            validate_csv_columns(f.read())
+
+    display_name = filenames[0] if len(filenames) == 1 else f"{len(filenames)} files ({', '.join(filenames)})"
 
     report = Report(
         id=file_id,
         org_id=user.org_id,
         owner_id=user_id,
-        filename=file.filename,
-        file_path=dest,
+        filename=display_name,
+        file_path=report_dir,
         status="uploaded",
         category=category,
     )
@@ -275,14 +306,15 @@ async def upload_report(
     db.refresh(report)
 
     # Enqueue report for processing (Redis if available, else background thread)
-    job_id = _try_enqueue(file_id, dest, user.org_id)
+    job_id = _try_enqueue(file_id, report_dir, user.org_id)
 
     return {
         "id": file_id,
-        "filename": file.filename,
+        "filename": display_name,
         "status": "uploaded",
         "category": category,
         "job_id": job_id,
+        "files_uploaded": len(filenames),
     }
 
 

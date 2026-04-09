@@ -49,8 +49,8 @@ export default function Dashboard() {
   };
 
   const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
     if (!selectedCategory) {
       alert('Please select a category before uploading.');
       e.target.value = '';
@@ -59,7 +59,7 @@ export default function Dashboard() {
 
     setUploading(true);
     try {
-      const response = await reportAPI.upload(file, selectedCategory);
+      const response = await reportAPI.upload(Array.from(fileList), selectedCategory);
       setReports([response.data, ...reports]);
       e.target.value = '';
       setSelectedCategory('');
@@ -121,8 +121,10 @@ export default function Dashboard() {
             </div>
 
             <div className="mb-5 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-              <p className="font-semibold mb-1">Required format</p>
-              <p>Your CSV must use the standard template columns: <span className="font-mono text-xs">vendor, product_name, sku, quantity, unit_price, total_cost, billing_frequency, currency</span>. Download the template above to get started.</p>
+              <p className="font-semibold mb-1">Supported formats</p>
+              <p><strong>CSV:</strong> Use the standard template with columns: <span className="font-mono text-xs">vendor, product_name, sku, quantity, unit_price, total_cost, billing_frequency, currency</span>.</p>
+              <p className="mt-1"><strong>PDF:</strong> Upload contract documents, invoices, or pricing schedules. You can select multiple PDFs at once.</p>
+              <p className="mt-1"><strong>ZIP:</strong> Bundle multiple CSV and PDF files into a single ZIP archive.</p>
             </div>
 
             <div className="mb-4">
@@ -175,12 +177,13 @@ export default function Dashboard() {
                       : 'Select a category above to upload'}
                   </p>
                   <p className="text-sm text-slate-600 mt-2">
-                    CSV only · Must use the standard template · Max 10MB
+                    CSV, PDF, or ZIP · Select one or multiple files · Max 50MB total
                   </p>
                 </div>
                 <input
                   type="file"
-                  accept=".csv"
+                  accept=".csv,.pdf,.zip"
+                  multiple
                   onChange={handleFileUpload}
                   disabled={uploading || !selectedCategory}
                   className="hidden"

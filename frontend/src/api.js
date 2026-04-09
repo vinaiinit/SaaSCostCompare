@@ -46,9 +46,10 @@ export const orgAPI = {
 };
 
 export const reportAPI = {
-  upload: (file, category) => {
+  upload: (files, category) => {
     const formData = new FormData();
-    formData.append('file', file);
+    const fileArray = Array.isArray(files) ? files : [files];
+    fileArray.forEach((file) => formData.append('files', file));
     formData.append('category', category);
     return api.post('/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
