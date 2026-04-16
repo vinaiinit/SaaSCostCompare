@@ -39,8 +39,8 @@ export const authAPI = {
 };
 
 export const orgAPI = {
-  create: (name, domain, revenue, size) =>
-    api.post('/orgs', { name, domain, revenue, size }),
+  create: (name, industry, revenue, size) =>
+    api.post('/orgs', { name, industry, revenue, size }),
   getOrg: (orgId) =>
     api.get(`/orgs/${orgId}`),
 };
@@ -61,18 +61,49 @@ export const reportAPI = {
     api.get(`/reports/${reportId}`),
   getReportStatus: (reportId) =>
     api.get(`/reports/${reportId}/status`),
-  createPaymentSession: (reportId, amount) =>
-    api.post('/payment/checkout', { report_id: reportId, amount }),
-  download: (reportId) =>
-    api.get(`/download/${reportId}`, { responseType: 'blob' }),
-  downloadFullReport: (reportId) =>
-    api.get(`/download/${reportId}/full-report`, { responseType: 'blob' }),
-  markPaid: (reportId) =>
-    api.post(`/reports/${reportId}/mark-paid`),
+  getLineItems: (uploadId) =>
+    api.get(`/uploads/${uploadId}/line-items`),
+  updateLineItem: (uploadId, itemId, data) =>
+    api.put(`/uploads/${uploadId}/line-items/${itemId}`, data),
+  checkFeasibility: (uploadId) =>
+    api.post(`/uploads/${uploadId}/feasibility`),
+  runComparison: (uploadId) =>
+    api.post(`/uploads/${uploadId}/compare`),
+  getComparison: (uploadId) =>
+    api.get(`/uploads/${uploadId}/comparison`),
   generateBenchmark: (reportId) =>
     api.post(`/reports/${reportId}/benchmark`),
   getBenchmark: (reportId) =>
     api.get(`/reports/${reportId}/benchmark`),
+  downloadFullReport: (reportId) =>
+    api.get(`/download/${reportId}/full-report`, { responseType: 'blob' }),
+  createPaymentSession: (reportId, amount) =>
+    api.post('/payment/checkout', { report_id: reportId, amount }),
+};
+
+export const coverageAPI = {
+  getAll: () =>
+    api.get('/data-coverage'),
+  getVendor: (vendorName) =>
+    api.get(`/data-coverage/${vendorName}`),
+};
+
+export const campaignAPI = {
+  submit: (files, vendorName, email, companyName, industry, companySize) => {
+    const formData = new FormData();
+    const fileArray = Array.isArray(files) ? files : [files];
+    fileArray.forEach((file) => formData.append('files', file));
+    formData.append('vendor_name', vendorName);
+    if (email) formData.append('email', email);
+    if (companyName) formData.append('company_name', companyName);
+    if (industry) formData.append('industry', industry);
+    if (companySize) formData.append('company_size', companySize);
+    return api.post('/campaign/submit', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  getStatus: (submissionId) =>
+    api.get(`/campaign/status/${submissionId}`),
 };
 
 export const contactAPI = {

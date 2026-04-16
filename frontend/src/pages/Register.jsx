@@ -10,7 +10,7 @@ export default function Register() {
 
   // Org form
   const [orgName, setOrgName] = useState('');
-  const [domain, setDomain] = useState('');
+  const [industry, setIndustry] = useState('');
   const [revenue, setRevenue] = useState('');
   const [size, setSize] = useState('');
   const [orgId, setOrgId] = useState(null);
@@ -26,15 +26,15 @@ export default function Register() {
     setError('');
 
     // Validate inputs
-    if (!orgName.trim() || !domain.trim() || !revenue || !size) {
+    if (!orgName.trim() || !industry.trim() || !revenue || !size) {
       setError('Please fill in all fields');
       setLoading(false);
       return;
     }
 
     try {
-      console.log('Creating org:', { orgName, domain, revenue: parseFloat(revenue), size: parseInt(size) });
-      const response = await orgAPI.create(orgName, domain, parseFloat(revenue), parseInt(size));
+      console.log('Creating org:', { orgName, industry, revenue: parseFloat(revenue), size: parseInt(size) });
+      const response = await orgAPI.create(orgName, industry, parseFloat(revenue), parseInt(size));
       console.log('Org created:', response.data);
       setOrgId(response.data.id);
       setStep(2);
@@ -113,8 +113,8 @@ export default function Register() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Industry</label>
                 <select
-                  value={domain}
-                  onChange={(e) => setDomain(e.target.value)}
+                  value={industry}
+                  onChange={(e) => setIndustry(e.target.value)}
                   className="input-field"
                   required
                   disabled={loading}

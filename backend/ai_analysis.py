@@ -1,232 +1,89 @@
+"""
+AI layer — used ONLY for:
+1. Structured data extraction from PDFs (in extraction.py, not here)
+2. Narrative generation from pre-computed comparison results
+
+AI does NOT perform any analysis or comparison. All numbers come from
+the peer comparison engine. AI only formats and presents them.
+"""
 import anthropic
 import json
 import os
-import csv
 from datetime import datetime
 from sqlalchemy.orm import Session
+
 from models import Report, Organization, BenchmarkReport
 
 
-def read_saas_report(file_path: str) -> dict:
+def generate_narrative(comparison_data: dict, org_profile: dict) -> dict:
     """
-    Read and parse SaaS expense report from a file or directory.
-    Supports CSV, JSON, PDF files, and directories containing multiple files.
-    Returns: {"items": [...], "pdf_text": "...", "file_summary": "..."}
-    """
-    from file_processor import process_uploaded_files, parse_csv_to_items
+    Given structured comparison results (already computed from real peer data),
+    generate a customer-friendly narrative report.
 
-    # If it's a directory, process all files in it
-    if os.path.isdir(file_path):
-        all_files = []
-        for root, dirs, files in os.walk(file_path):
-            for fname in files:
-                fpath = os.path.join(root, fname)
-                lower = fname.lower()
-                if lower.endswith((".csv", ".pdf", ".json")):
-                    all_files.append(fpath)
-        if all_files:
-            return process_uploaded_files(all_files)
-        return {"items": [], "pdf_text": "", "file_summary": "No supported files found"}
-
-    # Single file fallback (backwards compatible)
-    data = {"items": [], "pdf_text": "", "file_summary": ""}
-
-    if file_path.endswith(".csv"):
-        data["items"] = parse_csv_to_items(file_path)
-        data["file_summary"] = f"{os.path.basename(file_path)} (CSV, {len(data['items'])} rows)"
-    elif file_path.endswith(".json"):
-        try:
-            with open(file_path, "r") as f:
-                loaded = json.load(f)
-                if isinstance(loaded, dict) and "items" in loaded:
-                    data["items"] = loaded["items"]
-                else:
-                    data["items"] = loaded if isinstance(loaded, list) else []
-        except Exception as e:
-            print(f"Error reading JSON: {e}")
-    elif file_path.endswith(".pdf"):
-        result = process_uploaded_files([file_path])
-        return result
-
-    return data
-
-
-def analyze_with_claude(report_data: dict, org_profile: dict) -> str:
-    """
-    Use Claude to analyze SaaS expenses and generate insights.
+    Claude does NOT perform any analysis — it formats pre-computed data.
     """
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-    # Build data section based on what's available
-    data_section = ""
-    items = report_data.get("items", [])
-    pdf_text = report_data.get("pdf_text", "")
+    items = comparison_data.get("items", [])
+    summary = comparison_data.get("summary", {})
 
-    if items:
-        data_section += f"Structured SaaS Spend Data (CSV):\n{json.dumps(items, indent=2)}\n"
-    if pdf_text:
-        data_section += f"\nContract/Document Text (extracted from PDF):\n{pdf_text[:8000]}\n"
-    if not items and not pdf_text:
-        data_section = "No data could be extracted from the uploaded files.\n"
+    prompt = f"""You are a professional report writer for a SaaS cost benchmarking platform.
 
-    file_summary = report_data.get("file_summary", "")
+Given the STRUCTURED COMPARISON DATA below (already computed from real peer contract data),
+write a clear, professional narrative report.
 
-    prompt = f"""
-Analyze this organisation's SaaS spending data and provide insights.
+CRITICAL RULES:
+- Do NOT perform any additional analysis or generate any numbers not in the data below.
+- Use the EXACT dollar amounts, percentiles, and assessments from the data.
+- Do NOT invent, estimate, or extrapolate any figures.
+- Do NOT name any research firms, reports, or external sources.
+- Present the data in a customer-friendly, actionable format.
 
-Files uploaded: {file_summary}
+ORGANIZATION PROFILE:
+- Name: {org_profile.get('name', 'N/A')}
+- Industry: {org_profile.get('industry', 'N/A')}
+- Company Size: {org_profile.get('size_band', 'N/A')}
 
-If CSV data is present, it uses a standardised schema with columns:
-vendor, product_name, sku, sku_description, quantity, unit_price, total_cost,
-billing_frequency, currency, contract_start_date, contract_end_date, notes.
+COMPARISON SUMMARY:
+- Total line items analyzed: {summary.get('total_items', 0)}
+- Items with sufficient peer data: {summary.get('benchmarkable_items', 0)}
+- Items with insufficient data: {summary.get('insufficient_data_items', 0)}
+- Data coverage: {summary.get('coverage_pct', 0)}%
+- Total annual spend (uploaded data): ${summary.get('total_annual_spend', 0):,.2f}
+- Items above market: {summary.get('spend_above_market', 0)}
+- Total potential savings: ${summary.get('total_potential_savings', 0):,.2f}
 
-If PDF/contract text is present, extract relevant pricing, SKU, and contract details from the text.
+ASSESSMENT BREAKDOWN:
+{json.dumps(summary.get('assessment_breakdown', {}), indent=2)}
 
-Organisation Profile:
-- Name: {org_profile.get('name')}
-- Industry: {org_profile.get('domain')}
-- Annual Revenue: ${org_profile.get('revenue', 0):,.0f}
-- Employees: {org_profile.get('size', 0)}
+DETAILED ITEM COMPARISONS:
+{json.dumps(items, indent=2)}
 
-{data_section}
-
-IMPORTANT RULES:
-- ONLY analyze the data that has been provided. Do NOT infer or assume spend on categories not present in the data.
-- Do NOT state that spend on unmentioned categories (HR software, Finance software, etc.) is zero — simply do not mention them.
-- Do NOT guess or infer what type of business the organisation is based on its name. Only use the Industry field provided above.
-- Do NOT name any public sources, research firms, websites, or reports (e.g., Gartner, Forrester, Blissfully, Vendr). Present all benchmarks as "industry benchmarks" without attribution.
-- This data represents only the uploaded vendor's spend, NOT the organisation's total SaaS spend. Do not treat it as total SaaS spend.
-- If data comes from PDFs, extract and summarize the key pricing and contract information before analyzing.
-
-Please provide:
-1. Total spend from the uploaded data and per-employee cost for this vendor
-2. Top 5 most expensive items/SKUs by cost
-3. Spend breakdown by product/SKU
-4. Any items with unusually high pricing relative to the organisation's size
-5. Key contract terms and dates (expiry, renewal windows)
-6. Immediate optimisation recommendations (consolidation, tier downgrades, renegotiation points)
-
-Format the response as clear, actionable insights using specific dollar amounts.
-"""
-
-    try:
-        message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return message.content[0].text
-    except Exception as e:
-        print(f"Error calling Claude API: {e}")
-        return f"Analysis failed: {str(e)}"
-
-
-def calculate_total_spend(report_data: dict) -> float:
-    """Sum total_cost column across all line items."""
-    total = 0.0
-    for item in report_data.get("items", []):
-        # Normalise key lookup (strip whitespace, lowercase)
-        normalised = {k.strip().lower(): v for k, v in item.items()}
-        raw = normalised.get("total_cost") or normalised.get("cost") or normalised.get("amount") or "0"
-        try:
-            total += float(str(raw).replace("$", "").replace(",", ""))
-        except (ValueError, TypeError):
-            pass
-    return total
-
-
-def generate_benchmark_report(
-    target_data: dict, target_org: dict, peer_data: list
-) -> dict:
-    """
-    Generate an AI benchmarking report comparing target org's SaaS spend vs peers.
-    peer_data: list of {"org": {revenue, size}, "report": {items: [...]}}
-    Falls back to Claude's training knowledge of industry benchmarks when peer data is sparse.
-    """
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
-    total_spend = calculate_total_spend(target_data)
-    employees = max(target_org.get("size", 1), 1)
-    revenue = max(target_org.get("revenue", 1), 1)
-    spend_per_employee = total_spend / employees
-    spend_pct_revenue = (total_spend / revenue) * 100
-
-    peer_section = ""
-    if peer_data:
-        peer_section = f"\n\nACTUAL PEER DATA ({len(peer_data)} similar organizations in database):\n"
-        for i, peer in enumerate(peer_data, 1):
-            peer_total = calculate_total_spend(peer["report"])
-            peer_emp = max(peer["org"].get("size", 1), 1)
-            peer_rev = max(peer["org"].get("revenue", 1), 1)
-            peer_section += (
-                f"\nPeer {i}: Revenue=${peer['org']['revenue']:,.0f}, "
-                f"Employees={peer['org']['size']}, "
-                f"Total SaaS Spend=${peer_total:,.0f} "
-                f"(${peer_total/peer_emp:,.0f}/employee, {peer_total/peer_rev*100:.1f}% of revenue)\n"
-            )
-            # Include top items (truncated)
-            items_preview = peer["report"].get("items", [])[:10]
-            if items_preview:
-                peer_section += f"Top tools: {json.dumps(items_preview)[:500]}\n"
-    else:
-        peer_section = (
-            "\n\nNo peer organizations found in database with similar revenue/size. "
-            "Use industry benchmarks for similar-sized organizations."
-        )
-
-    prompt = f"""You are a SaaS cost benchmarking expert. Generate a detailed benchmarking report comparing this organization's vendor-specific SaaS spending against industry peers.
-
-IMPORTANT: This data represents ONLY the organization's spend with one specific vendor, NOT their total SaaS spend across all vendors. All analysis must be scoped to this vendor's data only.
-
-TARGET ORGANIZATION:
-- Name: {target_org.get("name")}
-- Industry: {target_org.get("domain")}
-- Annual Revenue: ${revenue:,.0f}
-- Employees: {employees}
-- Vendor Spend (uploaded data): ${total_spend:,.0f}
-- Vendor Spend per Employee: ${spend_per_employee:,.0f}
-- Vendor Spend as % of Revenue: {spend_pct_revenue:.2f}%
-
-TARGET ORG VENDOR SPEND DATA:
-{json.dumps(target_data.get("items", []), indent=2)[:3000]}
-{("CONTRACT/DOCUMENT TEXT:" + chr(10) + target_data.get("pdf_text", "")[:3000]) if target_data.get("pdf_text") else ""}
-{peer_section}
-
-IMPORTANT RULES:
-- ONLY analyze the data that has been provided. Do NOT infer or assume spend on categories or products not present in the uploaded data.
-- Do NOT state that spend on unmentioned categories (HR software, Finance software, Security, etc.) is zero or missing. Only comment on what is in the data.
-- Do NOT guess or infer what type of business the organisation is based on its name. Only use the Industry field provided above.
-- Do NOT name any public sources, research firms, websites, or reports (e.g., Gartner, Forrester, Blissfully, Vendr, IDC). Present all benchmarks as "industry benchmarks" without attribution.
-- Do NOT use markdown table separator lines (|---|---|---|). Use clean table formatting only.
-- Frame all spend figures as "vendor spend" not "total SaaS spend" since this is only one vendor's data.
-
-Generate a comprehensive benchmarking report with EXACTLY these sections:
+Write the report with these EXACT sections:
 
 ## Executive Summary
-2-3 sentence overview of how this org's spend with this vendor compares to peers. Include a clear verdict (e.g., "above average spender", "well-optimized").
+2-3 sentences summarizing the overall position using the data above. State the coverage percentage,
+how many items are above/below market, and the total potential savings figure.
 
-## Spend Benchmarks
-Compare this org's vendor spend metrics against industry benchmarks for similar-sized organizations. Include vendor spend per employee, vendor spend as % of revenue, and number of SKUs/products.
+## Peer Comparison Results
+For each item that has sufficient peers, present:
+- Product name and the user's annual cost
+- Peer median and percentile position (use exact numbers from the data)
+- Assessment (well below / below / at / above market)
+- Potential savings if above market
 
-## Product/SKU Breakdown & Benchmarks
-For each product or SKU category present in the uploaded data:
-- This org's spend and % of total vendor spend
-- Industry benchmark for this product/SKU (for similar size/revenue)
-- Assessment: On-target / Over-spending / Under-utilized
-
-## Tool-Level Analysis
-Top products/SKUs by spend with benchmark context. Flag any that appear redundant, overpriced, or where optimization is possible.
-
-## Percentile Ranking
-Provide an estimated percentile ranking for this vendor's spend efficiency (e.g., "65th percentile — you spend more than 65% of similar organizations with this vendor"). Explain the ranking.
+## Items With Limited Data
+List any items where peer data was insufficient. Explain that as more organizations
+contribute data, these items will become benchmarkable.
 
 ## Key Findings
-3-5 specific, data-backed findings. Be precise with numbers. Only reference data that was uploaded.
+3-5 bullet points drawn directly from the data. Use specific dollar amounts.
 
-## Prioritized Recommendations
-Numbered list of specific actions, ordered by potential savings impact. Include estimated savings where possible.
+## Recommendations
+Prioritized actions based on which items are above market, ordered by potential savings.
 
-Use specific dollar amounts and percentages throughout. Make the report actionable and direct.
+Use specific dollar amounts and percentages throughout. Be direct and actionable.
+Do NOT use markdown table separator lines (|---|).
 """
 
     try:
@@ -236,66 +93,32 @@ Use specific dollar amounts and percentages throughout. Make the report actionab
             messages=[{"role": "user", "content": prompt}],
         )
         return {
-            "report": message.content[0].text,
-            "peer_count": len(peer_data),
-            "total_spend": total_spend,
-            "spend_per_employee": spend_per_employee,
-            "spend_pct_revenue": spend_pct_revenue,
+            "narrative": message.content[0].text,
+            "peer_count": summary.get("benchmarkable_items", 0),
+            "total_spend": summary.get("total_annual_spend", 0),
+            "total_potential_savings": summary.get("total_potential_savings", 0),
+            "coverage_pct": summary.get("coverage_pct", 0),
             "generated_at": str(datetime.now()),
         }
     except Exception as e:
-        print(f"Error calling Claude API for benchmark: {e}")
+        print(f"Error generating narrative: {e}")
         return {"error": str(e)}
 
 
-def process_report(report_id: str, file_path: str, org_id: int, db: Session):
+def process_upload(report_id: str, file_path: str, org_id: int, db: Session):
     """
-    Main processing function: parse file, analyze with Claude, store results.
+    Main processing function: extract structured data from uploaded files.
+    Replaces the old AI-analysis process_report function.
     """
+    from extraction import run_extraction
+
     try:
-        # Update report status
-        report = db.query(Report).filter(Report.id == report_id).first()
-        if not report:
-            return {"error": "Report not found"}
-
-        report.status = "processing"
-        db.commit()
-
-        # Read and parse the report file
-        report_data = read_saas_report(file_path)
-
-        # Get organization profile for context
-        org = db.query(Organization).filter(Organization.id == org_id).first()
-        org_profile = {
-            "name": org.name,
-            "domain": org.domain,
-            "revenue": org.revenue,
-            "size": org.size,
-        }
-
-        # Analyze with Claude
-        analysis = analyze_with_claude(report_data, org_profile)
-
-        # Store results
-        warnings = report_data.get("warnings", [])
-        report.comparison_result = json.dumps(
-            {
-                "analysis": analysis,
-                "data_summary": {
-                    "item_count": len(report_data.get("items", [])),
-                    "analysis_date": str(datetime.now()),
-                    "file_summary": report_data.get("file_summary", ""),
-                },
-                "warnings": warnings,
-            }
-        )
-        report.status = "completed"
-        db.commit()
-
-        return {"status": "completed", "report_id": report_id}
-
+        result = run_extraction(report_id, file_path, org_id, db)
+        return {"status": "extracted", "report_id": report_id, **result}
     except Exception as e:
-        report.status = "failed"
-        report.comparison_result = json.dumps({"error": str(e)})
-        db.commit()
+        report = db.query(Report).filter(Report.id == report_id).first()
+        if report:
+            report.status = "failed"
+            report.comparison_result = json.dumps({"error": str(e)})
+            db.commit()
         return {"error": str(e), "report_id": report_id}
