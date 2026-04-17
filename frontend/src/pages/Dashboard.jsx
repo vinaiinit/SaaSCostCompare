@@ -19,6 +19,15 @@ export default function Dashboard() {
   const [uploading, setUploading] = useState(false);
   const [vendorName, setVendorName] = useState('');
 
+  const VENDORS = [
+    'Microsoft (M365/Azure)',
+    'Salesforce',
+    'SAP',
+    'Oracle',
+    'Google Cloud',
+    'AWS',
+  ];
+
   useEffect(() => {
     const fetchUser = async () => {
       try {
@@ -46,8 +55,8 @@ export default function Dashboard() {
   const handleFileUpload = async (e) => {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
-    if (!vendorName.trim()) {
-      alert('Please enter a vendor name before uploading.');
+    if (!vendorName) {
+      alert('Please select a vendor before uploading.');
       e.target.value = '';
       return;
     }
@@ -118,23 +127,32 @@ export default function Dashboard() {
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                Vendor Name
+                Select Vendor
               </label>
-              <input
-                type="text"
-                value={vendorName}
-                onChange={(e) => setVendorName(e.target.value)}
-                placeholder="e.g. Salesforce, AWS, Microsoft, Datadog..."
-                className="input-field max-w-md"
-              />
+              <div className="flex flex-wrap gap-2">
+                {VENDORS.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setVendorName(v)}
+                    className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
+                      vendorName === v
+                        ? 'bg-primary-600 text-white border-primary-600'
+                        : 'bg-white text-slate-700 border-slate-300 hover:border-primary-400'
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className={`border-2 border-dashed rounded-lg p-8 transition ${
-              vendorName.trim()
+              vendorName
                 ? 'border-primary-300 bg-primary-50 hover:bg-primary-100 cursor-pointer'
                 : 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
             }`}>
-              <label className={vendorName.trim() ? 'cursor-pointer block' : 'cursor-not-allowed block'}>
+              <label className={vendorName ? 'cursor-pointer block' : 'cursor-not-allowed block'}>
                 <div className="text-center">
                   <svg className="mx-auto h-12 w-12 text-primary-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -143,8 +161,8 @@ export default function Dashboard() {
                     {uploading
                       ? 'Uploading...'
                       : vendorName.trim()
-                      ? `Click to upload your ${vendorName.trim()} contract data`
-                      : 'Enter a vendor name above to upload'}
+                      ? `Click to upload your ${vendorName} contract data`
+                      : 'Select a vendor above to upload'}
                   </p>
                   <p className="text-sm text-slate-600 mt-2">
                     CSV, PDF, or ZIP &middot; Select one or multiple files &middot; Max 50MB total
@@ -155,7 +173,7 @@ export default function Dashboard() {
                   accept=".csv,.pdf,.zip"
                   multiple
                   onChange={handleFileUpload}
-                  disabled={uploading || !vendorName.trim()}
+                  disabled={uploading || !vendorName}
                   className="hidden"
                 />
               </label>
