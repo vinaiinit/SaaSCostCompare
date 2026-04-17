@@ -276,8 +276,12 @@ def run_extraction(upload_id: str, file_path: str, org_id: int, db: Session) -> 
     Main extraction entry point. Process all files for an upload,
     extract structured line items, store in DB.
 
+    file_path can be a local directory or an s3:// URI.
     Returns: {"line_items_count": int, "warnings": [...], "file_summary": str}
     """
+    import shutil
+    from s3_storage import download_to_temp
+
     report = db.query(Report).filter(Report.id == upload_id).first()
     if not report:
         return {"error": "Upload not found"}
@@ -285,59 +289,68 @@ def run_extraction(upload_id: str, file_path: str, org_id: int, db: Session) -> 
     report.status = "extracting"
     db.commit()
 
+    # Download from S3 to temp dir if needed
+    is_s3 = file_path.startswith("s3://")
+    local_path = download_to_temp(file_path) if is_s3 else file_path
+
     all_items = []
     all_warnings = []
     file_names = []
 
-    # Collect all files to process
-    files_to_process = []
-    if os.path.isdir(file_path):
-        for root, dirs, files in os.walk(file_path):
-            for fname in files:
-                fpath = os.path.join(root, fname)
-                lower = fname.lower()
-                if lower.endswith((".csv", ".pdf")):
-                    files_to_process.append(fpath)
-                elif lower.endswith(".zip"):
-                    import tempfile
-                    extracted = process_zip(fpath, root)
-                    files_to_process.extend(extracted)
-    elif os.path.isfile(file_path):
-        files_to_process.append(file_path)
+    try:
+        # Collect all files to process
+        files_to_process = []
+        if os.path.isdir(local_path):
+            for root, dirs, files in os.walk(local_path):
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    lower = fname.lower()
+                    if lower.endswith((".csv", ".pdf")):
+                        files_to_process.append(fpath)
+                    elif lower.endswith(".zip"):
+                        extracted = process_zip(fpath, root)
+                        files_to_process.extend(extracted)
+        elif os.path.isfile(local_path):
+            files_to_process.append(local_path)
 
-    # Process each file
-    for fpath in files_to_process:
-        basename = os.path.basename(fpath)
-        lower = fpath.lower()
+        # Process each file
+        for fpath in files_to_process:
+            basename = os.path.basename(fpath)
+            lower = fpath.lower()
 
-        if lower.endswith(".csv"):
-            items = extract_from_csv(fpath, upload_id, org_id, db)
-            all_items.extend(items)
-            file_names.append(f"{basename} (CSV, {len(items)} rows)")
+            if lower.endswith(".csv"):
+                items = extract_from_csv(fpath, upload_id, org_id, db)
+                all_items.extend(items)
+                file_names.append(f"{basename} (CSV, {len(items)} rows)")
 
-        elif lower.endswith(".pdf"):
-            items, warnings = extract_from_pdf(fpath, upload_id, org_id, db)
-            all_items.extend(items)
-            all_warnings.extend(warnings)
-            file_names.append(f"{basename} (PDF, {len(items)} items extracted)")
+            elif lower.endswith(".pdf"):
+                items, warnings = extract_from_pdf(fpath, upload_id, org_id, db)
+                all_items.extend(items)
+                all_warnings.extend(warnings)
+                file_names.append(f"{basename} (PDF, {len(items)} items extracted)")
 
-    # Store all line items in DB
-    for item in all_items:
-        db.add(item)
+        # Store all line items in DB
+        for item in all_items:
+            db.add(item)
 
-    file_summary = "; ".join(file_names) if file_names else "No files processed"
+        file_summary = "; ".join(file_names) if file_names else "No files processed"
 
-    # Update report
-    report.status = "extracted"
-    report.comparison_result = json.dumps({
-        "extraction_summary": {
-            "line_items_count": len(all_items),
-            "file_summary": file_summary,
-            "extracted_at": str(datetime.now()),
-        },
-        "warnings": all_warnings,
-    })
-    db.commit()
+        # Update report
+        report.status = "extracted"
+        report.comparison_result = json.dumps({
+            "extraction_summary": {
+                "line_items_count": len(all_items),
+                "file_summary": file_summary,
+                "extracted_at": str(datetime.now()),
+            },
+            "warnings": all_warnings,
+        })
+        db.commit()
+
+    finally:
+        # Clean up temp directory if we downloaded from S3
+        if is_s3 and os.path.isdir(local_path):
+            shutil.rmtree(local_path, ignore_errors=True)
 
     return {
         "line_items_count": len(all_items),

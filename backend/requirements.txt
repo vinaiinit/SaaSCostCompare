@@ -16,3 +16,4 @@ python-dotenv
 reportlab
 pdfplumber
 alembic
+boto3

@@ -36,6 +36,7 @@ from schemas import (
 )
 from ai_analysis import process_upload, generate_narrative
 from comparison_engine import generate_comparison, feasibility_check, refresh_coverage_stats
+from s3_storage import is_s3_enabled, upload_directory as s3_upload_directory, download_to_temp
 from database import SessionLocal
 
 
@@ -83,6 +84,13 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 ALLOWED_EXTENSIONS = {".csv", ".pdf", ".zip"}
+
+
+def _safe_org_folder(org: Organization) -> str:
+    """Build a filesystem/S3-safe folder name for an organization."""
+    import re
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", (org.name or "unknown")).strip("_")[:50]
+    return f"org_{org.id}_{safe_name}"
 
 REQUIRED_CSV_COLUMNS = {
     "vendor", "product_name", "sku", "quantity",
@@ -249,8 +257,13 @@ async def upload_report(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    org = db.query(Organization).filter(Organization.id == user.org_id).first()
+    if not org:
+        raise HTTPException(status_code=400, detail="Organization not found for user")
+
     file_id = str(uuid.uuid4())
-    report_dir = os.path.join(UPLOAD_DIR, file_id)
+    org_folder = _safe_org_folder(org)
+    report_dir = os.path.join(UPLOAD_DIR, org_folder, file_id)
     os.makedirs(report_dir, exist_ok=True)
 
     saved_files = []
@@ -289,12 +302,22 @@ async def upload_report(
 
     display_name = filenames[0] if len(filenames) == 1 else f"{len(filenames)} files ({', '.join(filenames)})"
 
+    # Upload to S3 if configured, otherwise keep local path
+    if is_s3_enabled():
+        import shutil
+        s3_key = f"{org_folder}/{file_id}"
+        s3_uri = s3_upload_directory(report_dir, s3_key)
+        stored_path = s3_uri
+        shutil.rmtree(report_dir, ignore_errors=True)  # clean up local temp
+    else:
+        stored_path = report_dir
+
     report = Report(
         id=file_id,
         org_id=user.org_id,
         owner_id=user_id,
         filename=display_name,
-        file_path=report_dir,
+        file_path=stored_path,
         status="uploaded",
         category=category,  # vendor name
     )
@@ -303,7 +326,7 @@ async def upload_report(
     db.refresh(report)
 
     # Enqueue extraction (not AI analysis)
-    job_id = _try_enqueue(file_id, report_dir, user.org_id)
+    job_id = _try_enqueue(file_id, stored_path, user.org_id)
 
     return {
         "id": file_id,
@@ -614,8 +637,11 @@ async def campaign_submit(
     db: Session = Depends(get_db),
 ):
     """Anonymous/semi-anonymous contract upload for data collection campaign."""
+    import re
     file_id = str(uuid.uuid4())
-    campaign_dir = os.path.join(UPLOAD_DIR, "campaign", file_id)
+    safe_company = re.sub(r"[^a-zA-Z0-9_-]", "_", (company_name or "anonymous")).strip("_")[:50]
+    campaign_folder = f"campaign/{safe_company}"
+    campaign_dir = os.path.join(UPLOAD_DIR, campaign_folder, file_id)
     os.makedirs(campaign_dir, exist_ok=True)
 
     for file in files:
@@ -631,13 +657,23 @@ async def campaign_submit(
         with open(dest, "wb") as buffer:
             buffer.write(content)
 
+    # Upload to S3 if configured
+    if is_s3_enabled():
+        import shutil
+        s3_key = f"{campaign_folder}/{file_id}"
+        s3_uri = s3_upload_directory(campaign_dir, s3_key)
+        stored_path = s3_uri
+        shutil.rmtree(campaign_dir, ignore_errors=True)
+    else:
+        stored_path = campaign_dir
+
     submission = CampaignSubmission(
         email=email,
         company_name=company_name,
         industry=industry,
         company_size=company_size,
         vendor_name=vendor_name,
-        file_path=campaign_dir,
+        file_path=stored_path,
         status="submitted",
     )
     db.add(submission)
@@ -711,12 +747,25 @@ def download_report(
     user_id: int = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
+    from fastapi.responses import RedirectResponse
+    from s3_storage import generate_presigned_url, S3_PREFIX
+
     report = db.query(Report).filter(Report.id == report_id).first()
     if not report or report.owner_id != user_id:
         raise HTTPException(status_code=404, detail="Report not found")
-    if not os.path.exists(report.file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(report.file_path, filename=report.filename)
+
+    if report.file_path.startswith("s3://"):
+        # Generate a presigned URL and redirect the client
+        # Extract the S3 key relative to the prefix
+        s3_key = report.id  # files stored under uploads/<report_id>/
+        url = generate_presigned_url(s3_key)
+        if not url:
+            raise HTTPException(status_code=500, detail="Could not generate download link")
+        return RedirectResponse(url=url)
+    else:
+        if not os.path.exists(report.file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+        return FileResponse(report.file_path, filename=report.filename)
 
 
 @app.get("/download/{report_id}/full-report")

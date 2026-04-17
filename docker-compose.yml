@@ -34,6 +34,11 @@ services:
     environment:
       DATABASE_URL: postgresql://saas:saas_dev_password@postgres:5432/saascostcompare
       REDIS_URL: redis://redis:6379
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_PREFIX: ${S3_PREFIX:-uploads}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
     volumes:
       - uploads_data:/app/uploads
     depends_on:
@@ -50,6 +55,11 @@ services:
     environment:
       DATABASE_URL: postgresql://saas:saas_dev_password@postgres:5432/saascostcompare
       REDIS_URL: redis://redis:6379
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_PREFIX: ${S3_PREFIX:-uploads}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
     volumes:
       - uploads_data:/app/uploads
     depends_on:
