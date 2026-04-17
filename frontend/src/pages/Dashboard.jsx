@@ -8,22 +8,18 @@ const formatDate = (s) => {
   return isNaN(d) ? s : d.toLocaleDateString();
 };
 
+const formatCurrency = (n) =>
+  n != null ? `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—';
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState('');
-
-  const CATEGORIES = ['AWS', 'Microsoft', 'Google', 'Salesforce', 'Pega', 'SAP'];
+  const [vendorName, setVendorName] = useState('');
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('payment') === 'success') {
-      window.history.replaceState({}, '', '/dashboard');
-    }
-
     const fetchUser = async () => {
       try {
         const [userRes, reportsRes] = await Promise.all([
@@ -39,7 +35,6 @@ export default function Dashboard() {
         setLoading(false);
       }
     };
-
     fetchUser();
   }, [navigate]);
 
@@ -51,18 +46,18 @@ export default function Dashboard() {
   const handleFileUpload = async (e) => {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
-    if (!selectedCategory) {
-      alert('Please select a category before uploading.');
+    if (!vendorName.trim()) {
+      alert('Please enter a vendor name before uploading.');
       e.target.value = '';
       return;
     }
 
     setUploading(true);
     try {
-      const response = await reportAPI.upload(Array.from(fileList), selectedCategory);
+      const response = await reportAPI.upload(Array.from(fileList), vendorName.trim());
       setReports([response.data, ...reports]);
       e.target.value = '';
-      setSelectedCategory('');
+      setVendorName('');
     } catch (err) {
       alert('Upload failed: ' + (err.response?.data?.detail || 'Unknown error'));
     } finally {
@@ -83,31 +78,25 @@ export default function Dashboard() {
       {/* Navigation */}
       <nav className="bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-primary-600">SaaSCostCompare</h1>
-          </div>
+          <h1 className="text-2xl font-bold text-primary-600">SaaSCostCompare</h1>
           <div className="flex items-center gap-4">
             <div className="text-right">
               <p className="text-sm text-slate-600">{user?.full_name}</p>
               <p className="text-xs text-slate-500">{user?.email}</p>
             </div>
-            <button
-              onClick={handleLogout}
-              className="btn-secondary text-sm"
-            >
+            <button onClick={handleLogout} className="btn-secondary text-sm">
               Logout
             </button>
           </div>
         </div>
       </nav>
 
-      {/* Main Content */}
       <div className="max-w-6xl mx-auto px-4 py-8">
         {/* Upload Section */}
         <div className="mb-8">
           <div className="card p-8">
             <div className="flex items-start justify-between mb-6">
-              <h2 className="text-2xl font-bold text-slate-900">Upload SaaS Spend Data</h2>
+              <h2 className="text-2xl font-bold text-slate-900">Upload SaaS Contract Data</h2>
               <a
                 href="/saas_spend_template.csv"
                 download="saas_spend_template.csv"
@@ -122,62 +111,43 @@ export default function Dashboard() {
 
             <div className="mb-5 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
               <p className="font-semibold mb-1">Supported formats</p>
-              <p><strong>CSV:</strong> Use the standard template with columns: <span className="font-mono text-xs">vendor, product_name, sku, quantity, unit_price, total_cost, billing_frequency, currency</span>.</p>
-              <p className="mt-1"><strong>PDF:</strong> Upload contract documents, invoices, or pricing schedules. You can select multiple PDFs at once.</p>
-              <p className="mt-1"><strong>ZIP:</strong> Bundle multiple CSV and PDF files into a single ZIP archive.</p>
+              <p><strong>CSV:</strong> Use the template with columns: <span className="font-mono text-xs">vendor, product_name, sku, quantity, unit_price, total_cost, billing_frequency, currency</span>.</p>
+              <p className="mt-1"><strong>PDF:</strong> Upload contract documents, invoices, or pricing schedules.</p>
+              <p className="mt-1"><strong>ZIP:</strong> Bundle multiple CSV and PDF files into a single archive.</p>
             </div>
 
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                Select Vendor Category
+                Vendor Name
               </label>
-              <div className="flex flex-wrap gap-2">
-                {CATEGORIES.map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
-                      selectedCategory === cat
-                        ? 'bg-primary-600 text-white border-primary-600'
-                        : 'bg-white text-slate-700 border-slate-300 hover:border-primary-400'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
+              <input
+                type="text"
+                value={vendorName}
+                onChange={(e) => setVendorName(e.target.value)}
+                placeholder="e.g. Salesforce, AWS, Microsoft, Datadog..."
+                className="input-field max-w-md"
+              />
             </div>
 
             <div className={`border-2 border-dashed rounded-lg p-8 transition ${
-              selectedCategory
+              vendorName.trim()
                 ? 'border-primary-300 bg-primary-50 hover:bg-primary-100 cursor-pointer'
                 : 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
             }`}>
-              <label className={selectedCategory ? 'cursor-pointer block' : 'cursor-not-allowed block'}>
+              <label className={vendorName.trim() ? 'cursor-pointer block' : 'cursor-not-allowed block'}>
                 <div className="text-center">
-                  <svg
-                    className="mx-auto h-12 w-12 text-primary-600 mb-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 4v16m8-8H4"
-                    />
+                  <svg className="mx-auto h-12 w-12 text-primary-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                   </svg>
                   <p className="text-lg font-medium text-slate-900">
                     {uploading
                       ? 'Uploading...'
-                      : selectedCategory
-                      ? `Click to upload your ${selectedCategory} spend data`
-                      : 'Select a category above to upload'}
+                      : vendorName.trim()
+                      ? `Click to upload your ${vendorName.trim()} contract data`
+                      : 'Enter a vendor name above to upload'}
                   </p>
                   <p className="text-sm text-slate-600 mt-2">
-                    CSV, PDF, or ZIP · Select one or multiple files · Max 50MB total
+                    CSV, PDF, or ZIP &middot; Select one or multiple files &middot; Max 50MB total
                   </p>
                 </div>
                 <input
@@ -185,7 +155,7 @@ export default function Dashboard() {
                   accept=".csv,.pdf,.zip"
                   multiple
                   onChange={handleFileUpload}
-                  disabled={uploading || !selectedCategory}
+                  disabled={uploading || !vendorName.trim()}
                   className="hidden"
                 />
               </label>
@@ -194,12 +164,11 @@ export default function Dashboard() {
         </div>
 
         {/* Reports Section */}
-        <div className="mb-10">
-          <h2 className="text-2xl font-bold mb-6 text-slate-900">Your Reports</h2>
-
+        <div>
+          <h2 className="text-2xl font-bold mb-6 text-slate-900">Your Uploads</h2>
           {reports.length === 0 ? (
             <div className="card p-12 text-center">
-              <p className="text-slate-500 text-lg">No reports yet. Upload one to get started!</p>
+              <p className="text-slate-500 text-lg">No uploads yet. Upload a contract to get started!</p>
             </div>
           ) : (
             <div className="grid gap-6">
@@ -209,212 +178,140 @@ export default function Dashboard() {
             </div>
           )}
         </div>
-
-        {/* Downloaded Reports Section */}
-        <DownloadedReports reports={reports} />
       </div>
     </div>
   );
 }
 
-function DownloadedReports({ reports }) {
-  const downloaded = reports.filter((r) => r.payment_status === 'completed');
-  const [downloading, setDownloading] = useState({});
-  const [benchmarks, setBenchmarks] = useState({});
-  const [expanded, setExpanded] = useState({});
-
-  useEffect(() => {
-    downloaded.forEach(async (report) => {
-      try {
-        const res = await reportAPI.getBenchmark(report.id);
-        setBenchmarks((prev) => ({ ...prev, [report.id]: res.data }));
-      } catch {
-        // no benchmark yet
-      }
-    });
-  }, [reports]);
-
-  const handleDownload = async (report) => {
-    setDownloading((prev) => ({ ...prev, [report.id]: true }));
-    try {
-      const res = await reportAPI.download(report.id);
-      const url = window.URL.createObjectURL(res.data);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = report.filename || `report-${report.id}.csv`;
-      link.click();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      alert('Download failed: ' + (err.response?.data?.detail || 'Unknown error'));
-    } finally {
-      setDownloading((prev) => ({ ...prev, [report.id]: false }));
-    }
-  };
-
-  const toggleExpand = (id) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
-
-  if (downloaded.length === 0) return null;
-
-  return (
-    <div>
-      <h2 className="text-2xl font-bold mb-6 text-slate-900">Downloaded Reports</h2>
-      <div className="grid gap-4">
-        {downloaded.map((report) => {
-          const bm = benchmarks[report.id];
-          const isExpanded = expanded[report.id];
-          return (
-            <div key={report.id} className="card p-6">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">{report.filename}</h3>
-                  <div className="flex items-center gap-2 mt-1">
-                    {report.category && (
-                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
-                        {report.category}
-                      </span>
-                    )}
-                    <span className="text-xs text-slate-500">
-                      {formatDate(report.created_at)}
-                    </span>
-                    <span className="badge badge-success">Paid</span>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleDownload(report)}
-                    disabled={downloading[report.id]}
-                    className="btn-primary text-sm disabled:opacity-50"
-                  >
-                    {downloading[report.id] ? 'Downloading...' : 'Re-download'}
-                  </button>
-                  {bm && (
-                    <button
-                      onClick={() => toggleExpand(report.id)}
-                      className="btn-secondary text-sm"
-                    >
-                      {isExpanded ? 'Hide Analysis' : 'View Analysis'}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {isExpanded && bm && (
-                <div className="mt-5 border-t border-slate-200 pt-5">
-                  <div className="grid grid-cols-3 gap-3 mb-4">
-                    <div className="bg-blue-50 rounded-lg p-3 text-center">
-                      <p className="text-xs text-slate-500 mb-1">Total SaaS Spend</p>
-                      <p className="text-lg font-bold text-blue-700">
-                        {bm.total_spend != null ? `$${Number(bm.total_spend).toLocaleString()}` : '—'}
-                      </p>
-                    </div>
-                    <div className="bg-purple-50 rounded-lg p-3 text-center">
-                      <p className="text-xs text-slate-500 mb-1">Per Employee</p>
-                      <p className="text-lg font-bold text-purple-700">
-                        {bm.spend_per_employee != null ? `$${Number(bm.spend_per_employee).toLocaleString()}` : '—'}
-                      </p>
-                    </div>
-                    <div className="bg-green-50 rounded-lg p-3 text-center">
-                      <p className="text-xs text-slate-500 mb-1">% of Revenue</p>
-                      <p className="text-lg font-bold text-green-700">
-                        {bm.spend_pct_revenue != null ? `${Number(bm.spend_pct_revenue).toFixed(1)}%` : '—'}
-                      </p>
-                    </div>
-                  </div>
-                  {bm.report && (
-                    <div className="bg-slate-50 rounded-lg border border-slate-200 p-4 max-h-96 overflow-y-auto">
-                      <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans">{bm.report}</pre>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 function ReportCard({ report }) {
   const [status, setStatus] = useState(report);
-  const [loading, setLoading] = useState(false);
-  const [benchmarking, setBenchmarking] = useState(false);
+  const [lineItems, setLineItems] = useState(null);
+  const [showLineItems, setShowLineItems] = useState(false);
+  const [comparison, setComparison] = useState(null);
+  const [showComparison, setShowComparison] = useState(false);
   const [benchmark, setBenchmark] = useState(null);
   const [showBenchmark, setShowBenchmark] = useState(false);
+  const [actionLoading, setActionLoading] = useState('');
 
+  // Poll for status updates
   useEffect(() => {
-    const FINAL_STATUSES = ['completed', 'failed', 'error'];
-    if (FINAL_STATUSES.includes(status.status)) return;
+    const FINAL = ['extracted', 'completed', 'failed', 'error'];
+    if (FINAL.includes(status.status)) return;
 
-    const checkStatus = async () => {
+    const check = async () => {
       try {
-        const response = await reportAPI.getReportStatus(report.id);
-        setStatus(response.data);
-      } catch (err) {
-        console.error('Failed to fetch status');
-      }
+        const res = await reportAPI.getReportStatus(report.id);
+        setStatus(res.data);
+      } catch {}
     };
 
-    const interval = setInterval(checkStatus, 3000);
+    const interval = setInterval(check, 3000);
     return () => clearInterval(interval);
   }, [report.id, status.status]);
 
   // Load existing benchmark on mount
   useEffect(() => {
-    const fetchBenchmark = async () => {
+    (async () => {
       try {
-        const response = await reportAPI.getBenchmark(report.id);
-        setBenchmark(response.data);
-      } catch {
-        // No benchmark yet — that's fine
-      }
-    };
-    fetchBenchmark();
+        const res = await reportAPI.getBenchmark(report.id);
+        setBenchmark(res.data);
+      } catch {}
+    })();
   }, [report.id]);
 
-  const handlePay = async () => {
-    setLoading(true);
+  // Load comparison if status is completed
+  useEffect(() => {
+    if (status.status === 'completed') {
+      (async () => {
+        try {
+          const res = await reportAPI.getComparison(report.id);
+          setComparison(res.data);
+        } catch {}
+      })();
+    }
+  }, [report.id, status.status]);
+
+  const handleViewLineItems = async () => {
+    if (lineItems) {
+      setShowLineItems(!showLineItems);
+      return;
+    }
+    setActionLoading('lineItems');
     try {
-      const res = await reportAPI.createPaymentSession(report.id, 9999);
-      window.location.href = res.data.url;
+      const res = await reportAPI.getLineItems(report.id);
+      setLineItems(res.data);
+      setShowLineItems(true);
     } catch (err) {
-      alert('Payment failed: ' + (err.response?.data?.detail || 'Unknown error'));
-      setLoading(false);
+      alert('Failed to load line items: ' + (err.response?.data?.detail || 'Unknown error'));
+    } finally {
+      setActionLoading('');
     }
   };
 
-  const handleDownload = async () => {
-    setLoading(true);
+  const handleRunComparison = async () => {
+    setActionLoading('compare');
+    try {
+      const res = await reportAPI.runComparison(report.id);
+      setComparison(res.data);
+      setShowComparison(true);
+      setStatus((prev) => ({ ...prev, status: 'completed' }));
+    } catch (err) {
+      alert('Comparison failed: ' + (err.response?.data?.detail || 'Unknown error'));
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  const handleGenerateNarrative = async () => {
+    setActionLoading('narrative');
+    try {
+      const res = await reportAPI.generateBenchmark(report.id);
+      setBenchmark(res.data);
+      setShowBenchmark(true);
+    } catch (err) {
+      alert('Report generation failed: ' + (err.response?.data?.detail || 'Unknown error'));
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  const handleDownloadPDF = async () => {
+    setActionLoading('download');
     try {
       const res = await reportAPI.downloadFullReport(report.id);
       const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
-      link.download = `SaaSCostCompare_Report_${report.filename?.replace(/\.[^.]+$/, '') || report.id}.pdf`;
+      link.download = `SaaSCostCompare_Report_${report.id}.pdf`;
       link.click();
       window.URL.revokeObjectURL(url);
     } catch (err) {
       alert('Download failed: ' + (err.response?.data?.detail || 'Unknown error'));
     } finally {
-      setLoading(false);
+      setActionLoading('');
     }
   };
 
-  const handleGenerateBenchmark = async () => {
-    setBenchmarking(true);
-    try {
-      const response = await reportAPI.generateBenchmark(report.id);
-      setBenchmark(response.data);
-      setShowBenchmark(true);
-    } catch (err) {
-      alert('Benchmark generation failed: ' + (err.response?.data?.detail || 'Unknown error'));
-    } finally {
-      setBenchmarking(false);
-    }
+  const statusBadge = () => {
+    const map = {
+      uploaded: { label: 'Uploaded', cls: 'bg-slate-100 text-slate-700' },
+      extracting: { label: 'Extracting...', cls: 'bg-blue-100 text-blue-700' },
+      extracted: { label: 'Extracted', cls: 'bg-green-100 text-green-800' },
+      completed: { label: 'Compared', cls: 'bg-emerald-100 text-emerald-800' },
+      failed: { label: 'Failed', cls: 'bg-red-100 text-red-800' },
+    };
+    const s = map[status.status] || { label: status.status, cls: 'bg-slate-100 text-slate-700' };
+    return <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.cls}`}>{s.label}</span>;
   };
+
+  const isExtracting = status.status === 'uploaded' || status.status === 'extracting';
+  const isExtracted = status.status === 'extracted' || status.status === 'completed';
+  const isCompared = status.status === 'completed';
 
   return (
     <div className="card p-6">
+      {/* Header */}
       <div className="flex justify-between items-start mb-4">
         <div>
           <h3 className="text-lg font-bold text-slate-900">{report.filename}</h3>
@@ -424,19 +321,13 @@ function ReportCard({ report }) {
                 {report.category}
               </span>
             )}
-            <p className="text-sm text-slate-500">
-              {formatDate(report.created_at)}
-            </p>
+            <span className="text-sm text-slate-500">{formatDate(report.created_at)}</span>
           </div>
         </div>
-        {status.status === 'processing' && (
-          <span className="badge badge-pending">Processing</span>
-        )}
-        {status.status === 'failed' && (
-          <span className="badge badge-error">Failed</span>
-        )}
+        {statusBadge()}
       </div>
 
+      {/* Warnings */}
       {status.warnings && status.warnings.length > 0 && (
         <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
           <div className="flex items-start gap-2">
@@ -452,48 +343,113 @@ function ReportCard({ report }) {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {status.status === 'processing' && (
-          <div className="flex-1 flex items-center justify-center gap-2 text-slate-600">
-            <div className="animate-spin w-4 h-4 border-2 border-primary-600 border-t-transparent rounded-full"></div>
-            <span>Analyzing with AI...</span>
-          </div>
-        )}
-        {status.status === 'completed' && !benchmark && (
+      {/* Extraction in progress */}
+      {isExtracting && (
+        <div className="flex items-center gap-2 text-slate-600 p-4 bg-blue-50 rounded-lg">
+          <div className="animate-spin w-4 h-4 border-2 border-primary-600 border-t-transparent rounded-full"></div>
+          <span>Extracting contract data from your files...</span>
+        </div>
+      )}
+
+      {/* Extraction summary */}
+      {isExtracted && status.extraction_summary && (
+        <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
+          <span className="font-medium">{status.line_item_count || 0} line items extracted</span>
+          {status.extraction_summary.file_summary && (
+            <span className="text-slate-500 ml-2">({status.extraction_summary.file_summary})</span>
+          )}
+        </div>
+      )}
+
+      {/* Action Buttons */}
+      {isExtracted && (
+        <div className="flex flex-wrap gap-2 mb-2">
+          {/* Step 1: Review Line Items */}
           <button
-            onClick={handleGenerateBenchmark}
-            disabled={benchmarking}
-            className="btn-primary flex-1 disabled:opacity-50 flex items-center justify-center gap-2"
+            onClick={handleViewLineItems}
+            disabled={!!actionLoading}
+            className="btn-secondary text-sm disabled:opacity-50"
           >
-            {benchmarking ? (
-              <>
-                <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
-                Generating Benchmark...
-              </>
-            ) : (
-              'Generate Benchmark Report'
-            )}
+            {actionLoading === 'lineItems' ? 'Loading...' : showLineItems ? 'Hide Line Items' : 'Review Line Items'}
           </button>
-        )}
-        {status.status === 'completed' && benchmark && (
-          <>
+
+          {/* Step 2: Run Comparison */}
+          {!isCompared && (
             <button
-              onClick={handleDownload}
-              disabled={loading}
-              className="btn-primary flex-1 disabled:opacity-50"
+              onClick={handleRunComparison}
+              disabled={!!actionLoading}
+              className="btn-primary text-sm disabled:opacity-50 flex items-center gap-2"
             >
-              {loading ? 'Downloading...' : 'Download PDF Report'}
+              {actionLoading === 'compare' ? (
+                <>
+                  <div className="animate-spin w-3 h-3 border-2 border-white border-t-transparent rounded-full"></div>
+                  Running Comparison...
+                </>
+              ) : 'Run Peer Comparison'}
             </button>
+          )}
+
+          {/* Step 3: Generate Narrative */}
+          {isCompared && !benchmark && (
+            <button
+              onClick={handleGenerateNarrative}
+              disabled={!!actionLoading}
+              className="btn-primary text-sm disabled:opacity-50 flex items-center gap-2"
+            >
+              {actionLoading === 'narrative' ? (
+                <>
+                  <div className="animate-spin w-3 h-3 border-2 border-white border-t-transparent rounded-full"></div>
+                  Generating Report...
+                </>
+              ) : 'Generate Benchmark Report'}
+            </button>
+          )}
+
+          {/* View Comparison */}
+          {isCompared && comparison && (
+            <button
+              onClick={() => setShowComparison(!showComparison)}
+              disabled={!!actionLoading}
+              className="btn-secondary text-sm disabled:opacity-50"
+            >
+              {showComparison ? 'Hide Comparison' : 'View Comparison'}
+            </button>
+          )}
+
+          {/* View/Hide Benchmark */}
+          {benchmark && (
             <button
               onClick={() => setShowBenchmark(!showBenchmark)}
-              className="btn-secondary disabled:opacity-50 flex items-center gap-2"
+              className="btn-secondary text-sm"
             >
-              {showBenchmark ? 'Hide Benchmark' : 'View Benchmark'}
+              {showBenchmark ? 'Hide Report' : 'View Report'}
             </button>
-          </>
-        )}
-      </div>
+          )}
 
+          {/* Download PDF */}
+          {benchmark && (
+            <button
+              onClick={handleDownloadPDF}
+              disabled={!!actionLoading}
+              className="btn-primary text-sm disabled:opacity-50"
+            >
+              {actionLoading === 'download' ? 'Downloading...' : 'Download PDF'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Line Items Panel */}
+      {showLineItems && lineItems && (
+        <LineItemsPanel items={lineItems} />
+      )}
+
+      {/* Comparison Panel */}
+      {showComparison && comparison && (
+        <ComparisonPanel data={comparison} />
+      )}
+
+      {/* Benchmark Panel */}
       {showBenchmark && benchmark && (
         <BenchmarkPanel benchmark={benchmark} />
       )}
@@ -501,37 +457,183 @@ function ReportCard({ report }) {
   );
 }
 
-function BenchmarkPanel({ benchmark }) {
-  const formatCurrency = (n) =>
-    n != null ? `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—';
-  const formatPct = (n) => (n != null ? `${Number(n).toFixed(1)}%` : '—');
 
-  // Render markdown-like text: headings, bold, tables as readable HTML
+function LineItemsPanel({ items }) {
+  if (!items || items.length === 0) {
+    return (
+      <div className="mt-4 p-4 bg-slate-50 rounded-lg text-sm text-slate-500">
+        No line items extracted.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 border-t border-slate-200 pt-4">
+      <h4 className="text-sm font-bold text-slate-900 mb-3">Extracted Line Items ({items.length})</h4>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-slate-50 text-left">
+              <th className="px-3 py-2 font-medium text-slate-600">Vendor</th>
+              <th className="px-3 py-2 font-medium text-slate-600">Product</th>
+              <th className="px-3 py-2 font-medium text-slate-600 text-right">Qty</th>
+              <th className="px-3 py-2 font-medium text-slate-600 text-right">Unit Price</th>
+              <th className="px-3 py-2 font-medium text-slate-600 text-right">Annual Cost</th>
+              <th className="px-3 py-2 font-medium text-slate-600">Billing</th>
+              <th className="px-3 py-2 font-medium text-slate-600">Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="px-3 py-2 font-medium text-slate-900">{item.vendor_name}</td>
+                <td className="px-3 py-2 text-slate-700">{item.product_name}</td>
+                <td className="px-3 py-2 text-right text-slate-700">{item.quantity}</td>
+                <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(item.unit_price)}</td>
+                <td className="px-3 py-2 text-right font-medium text-slate-900">{formatCurrency(item.total_cost_annual)}</td>
+                <td className="px-3 py-2 text-slate-500">{item.billing_frequency}</td>
+                <td className="px-3 py-2">
+                  <span className={`text-xs px-1.5 py-0.5 rounded ${
+                    item.extraction_source === 'csv' ? 'bg-green-50 text-green-700' :
+                    item.extraction_source === 'pdf_ai' ? 'bg-purple-50 text-purple-700' :
+                    'bg-slate-100 text-slate-600'
+                  }`}>
+                    {item.extraction_source === 'csv' ? 'CSV' :
+                     item.extraction_source === 'pdf_ai' ? 'PDF' : item.extraction_source}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+
+function ComparisonPanel({ data }) {
+  const { items, summary } = data;
+  if (!summary) return null;
+
+  const assessmentColors = {
+    well_below_market: 'bg-green-100 text-green-800',
+    below_market: 'bg-emerald-100 text-emerald-800',
+    at_market: 'bg-blue-100 text-blue-800',
+    above_market: 'bg-red-100 text-red-800',
+  };
+
+  const assessmentLabels = {
+    well_below_market: 'Well Below Market',
+    below_market: 'Below Market',
+    at_market: 'At Market',
+    above_market: 'Above Market',
+  };
+
+  return (
+    <div className="mt-4 border-t border-slate-200 pt-4">
+      <h4 className="text-sm font-bold text-slate-900 mb-3">Peer Comparison Results</h4>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div className="bg-blue-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Total Annual Spend</p>
+          <p className="text-lg font-bold text-blue-700">{formatCurrency(summary.total_annual_spend)}</p>
+        </div>
+        <div className="bg-green-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Potential Savings</p>
+          <p className="text-lg font-bold text-green-700">{formatCurrency(summary.total_potential_savings)}</p>
+        </div>
+        <div className="bg-purple-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Benchmarkable</p>
+          <p className="text-lg font-bold text-purple-700">{summary.benchmarkable_items} / {summary.total_items}</p>
+        </div>
+        <div className="bg-amber-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Data Coverage</p>
+          <p className="text-lg font-bold text-amber-700">{summary.coverage_pct}%</p>
+        </div>
+      </div>
+
+      {/* Assessment Breakdown */}
+      {summary.assessment_breakdown && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {Object.entries(summary.assessment_breakdown).map(([key, count]) => (
+            count > 0 && (
+              <span key={key} className={`text-xs font-medium px-2.5 py-1 rounded-full ${assessmentColors[key]}`}>
+                {assessmentLabels[key]}: {count}
+              </span>
+            )
+          ))}
+        </div>
+      )}
+
+      {/* Per-Item Results */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-slate-50 text-left">
+              <th className="px-3 py-2 font-medium text-slate-600">Vendor / Product</th>
+              <th className="px-3 py-2 font-medium text-slate-600 text-right">Your Cost</th>
+              <th className="px-3 py-2 font-medium text-slate-600 text-right">Peer Median</th>
+              <th className="px-3 py-2 font-medium text-slate-600 text-right">Percentile</th>
+              <th className="px-3 py-2 font-medium text-slate-600">Assessment</th>
+              <th className="px-3 py-2 font-medium text-slate-600 text-right">Savings</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.line_item_id} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="px-3 py-2">
+                  <span className="font-medium text-slate-900">{item.vendor_name}</span>
+                  <span className="text-slate-500 ml-1">{item.product_name}</span>
+                </td>
+                <td className="px-3 py-2 text-right text-slate-900">{formatCurrency(item.user_unit_cost_annual)}</td>
+                <td className="px-3 py-2 text-right text-slate-700">
+                  {item.has_sufficient_peers ? formatCurrency(item.peer_median) : '—'}
+                </td>
+                <td className="px-3 py-2 text-right text-slate-700">
+                  {item.has_sufficient_peers ? `${item.user_percentile}%` : '—'}
+                </td>
+                <td className="px-3 py-2">
+                  {item.has_sufficient_peers ? (
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${assessmentColors[item.assessment]}`}>
+                      {assessmentLabels[item.assessment]}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                      Insufficient Data ({item.peer_count} peers)
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right font-medium">
+                  {item.potential_annual_savings ? (
+                    <span className="text-green-700">{formatCurrency(item.potential_annual_savings)}</span>
+                  ) : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+
+function BenchmarkPanel({ benchmark }) {
   const renderMarkdown = (text) => {
     if (!text) return null;
     return text.split('\n').map((line, i) => {
       if (line.startsWith('## ')) {
-        return (
-          <h3 key={i} className="text-base font-bold text-slate-900 mt-5 mb-2 border-b border-slate-200 pb-1">
-            {line.slice(3)}
-          </h3>
-        );
+        return <h3 key={i} className="text-base font-bold text-slate-900 mt-5 mb-2 border-b border-slate-200 pb-1">{line.slice(3)}</h3>;
       }
       if (line.startsWith('# ')) {
-        return (
-          <h2 key={i} className="text-lg font-bold text-slate-900 mt-4 mb-2">
-            {line.slice(2)}
-          </h2>
-        );
+        return <h2 key={i} className="text-lg font-bold text-slate-900 mt-4 mb-2">{line.slice(2)}</h2>;
       }
       if (line.includes('|')) {
-        // Skip separator lines like |---|---|---|
         if (/^[\s|:-]+$/.test(line)) return null;
-        // Table row — render as a styled div
         const cells = line.split('|').filter((c) => c.trim() !== '');
-        if (cells.length === 0) return null;
-        const isSeparator = cells.every((c) => /^[-: ]+$/.test(c));
-        if (isSeparator) return null;
+        if (cells.length === 0 || cells.every((c) => /^[-: ]+$/.test(c))) return null;
         return (
           <div key={i} className="flex gap-2 text-sm border-b border-slate-100 py-1">
             {cells.map((cell, j) => (
@@ -543,59 +645,28 @@ function BenchmarkPanel({ benchmark }) {
         );
       }
       if (line.startsWith('- ') || line.startsWith('* ')) {
-        return (
-          <li key={i} className="text-sm text-slate-700 ml-4 list-disc">
-            {line.slice(2).replace(/\*\*(.*?)\*\*/g, '$1')}
-          </li>
-        );
+        return <li key={i} className="text-sm text-slate-700 ml-4 list-disc">{line.slice(2).replace(/\*\*(.*?)\*\*/g, '$1')}</li>;
       }
       if (/^\d+\. /.test(line)) {
-        return (
-          <li key={i} className="text-sm text-slate-700 ml-4 list-decimal">
-            {line.replace(/^\d+\. /, '').replace(/\*\*(.*?)\*\*/g, '$1')}
-          </li>
-        );
+        return <li key={i} className="text-sm text-slate-700 ml-4 list-decimal">{line.replace(/^\d+\. /, '').replace(/\*\*(.*?)\*\*/g, '$1')}</li>;
       }
       if (line.trim() === '') return <div key={i} className="h-1" />;
-      return (
-        <p key={i} className="text-sm text-slate-700">
-          {line.replace(/\*\*(.*?)\*\*/g, '$1')}
-        </p>
-      );
+      return <p key={i} className="text-sm text-slate-700">{line.replace(/\*\*(.*?)\*\*/g, '$1')}</p>;
     });
   };
 
   return (
-    <div className="mt-6 border-t border-slate-200 pt-6">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h4 className="text-base font-bold text-slate-900">Benchmarking Report</h4>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Based on {benchmark.peer_count > 0 ? `${benchmark.peer_count} peer organization(s) + ` : ''}AI industry knowledge
-            {benchmark.generated_at && ` · Generated ${new Date(benchmark.generated_at).toLocaleString()}`}
-          </p>
-        </div>
+    <div className="mt-4 border-t border-slate-200 pt-4">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-bold text-slate-900">Benchmark Report</h4>
+        {benchmark.generated_at && (
+          <span className="text-xs text-slate-500">
+            Generated {new Date(benchmark.generated_at).toLocaleString()}
+          </span>
+        )}
       </div>
-
-      {/* Key metrics strip */}
-      <div className="grid grid-cols-3 gap-3 mb-5">
-        <div className="bg-blue-50 rounded-lg p-3 text-center">
-          <p className="text-xs text-slate-500 mb-1">Total SaaS Spend</p>
-          <p className="text-lg font-bold text-blue-700">{formatCurrency(benchmark.total_spend)}</p>
-        </div>
-        <div className="bg-purple-50 rounded-lg p-3 text-center">
-          <p className="text-xs text-slate-500 mb-1">Per Employee</p>
-          <p className="text-lg font-bold text-purple-700">{formatCurrency(benchmark.spend_per_employee)}</p>
-        </div>
-        <div className="bg-green-50 rounded-lg p-3 text-center">
-          <p className="text-xs text-slate-500 mb-1">% of Revenue</p>
-          <p className="text-lg font-bold text-green-700">{formatPct(benchmark.spend_pct_revenue)}</p>
-        </div>
-      </div>
-
-      {/* Full report */}
       <div className="bg-slate-50 rounded-lg border border-slate-200 p-5 space-y-1 max-h-[600px] overflow-y-auto">
-        {renderMarkdown(benchmark.report)}
+        {renderMarkdown(benchmark.narrative || benchmark.report)}
       </div>
     </div>
   );
