@@ -297,6 +297,7 @@ export default function Login() {
             <button onClick={() => scrollTo('how-it-works')} className="hover:text-[#003366] transition">How It Works</button>
             <button onClick={() => scrollTo('insights')} className="hover:text-[#003366] transition">Insights</button>
             <button onClick={() => scrollTo('contact')} className="hover:text-[#003366] transition">Contact</button>
+            <Link to="/campaign" className="hover:text-[#003366] transition text-[#003366] font-semibold">Contribute Data</Link>
           </nav>
           <div className="flex items-center gap-3">
             <button
