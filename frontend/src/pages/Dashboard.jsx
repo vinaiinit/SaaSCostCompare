@@ -702,15 +702,9 @@ function BenchmarkPanel({ benchmark }) {
 
 const VENDOR_CREDENTIAL_FIELDS = {
   'Salesforce': [
-    { key: 'instance_url', label: 'Instance URL', placeholder: 'https://yourorg.salesforce.com', type: 'text' },
-    { key: 'access_token', label: 'Access Token (Session ID)', placeholder: 'Paste your session ID or OAuth token', type: 'password' },
-  ],
-  'Salesforce (Username/Password)': [
-    { key: 'client_id', label: 'Connected App Client ID', placeholder: 'Consumer key from your Connected App', type: 'text' },
-    { key: 'client_secret', label: 'Client Secret', placeholder: 'Consumer secret', type: 'password' },
-    { key: 'username', label: 'Username', placeholder: 'admin@yourorg.com', type: 'text' },
-    { key: 'password', label: 'Password', placeholder: 'Your password', type: 'password' },
-    { key: 'security_token', label: 'Security Token', placeholder: 'From Salesforce settings', type: 'password' },
+    { key: 'username', label: 'Salesforce Username', placeholder: 'admin@yourcompany.com', type: 'text' },
+    { key: 'password', label: 'Password', placeholder: 'Your Salesforce password', type: 'password' },
+    { key: 'security_token', label: 'Security Token (optional)', placeholder: 'From Setup → Reset My Security Token', type: 'password', optional: true },
   ],
   'Microsoft (M365/Azure)': [
     { key: 'tenant_id', label: 'Tenant ID', placeholder: 'Azure AD Tenant ID', type: 'text' },
@@ -850,7 +844,7 @@ function LicenseAnalysisSection({ vendors }) {
 
                   <button
                     onClick={handleAnalyze}
-                    disabled={analyzing || credFields.some(f => !credentials[f.key])}
+                    disabled={analyzing || credFields.filter(f => !f.optional).some(f => !credentials[f.key])}
                     className="mt-4 btn-primary text-sm disabled:opacity-50 flex items-center gap-2"
                   >
                     {analyzing ? (
