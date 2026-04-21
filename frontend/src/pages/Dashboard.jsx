@@ -702,6 +702,7 @@ function BenchmarkPanel({ benchmark }) {
 
 const VENDOR_CREDENTIAL_FIELDS = {
   'Salesforce': [
+    { key: 'login_url', label: 'Salesforce Login URL', placeholder: 'https://yourcompany.my.salesforce.com', type: 'text' },
     { key: 'username', label: 'Salesforce Username', placeholder: 'admin@yourcompany.com', type: 'text' },
     { key: 'password', label: 'Password', placeholder: 'Your Salesforce password', type: 'password' },
     { key: 'security_token', label: 'Security Token (optional)', placeholder: 'From Setup → Reset My Security Token', type: 'password', optional: true },

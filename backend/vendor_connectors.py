@@ -77,9 +77,13 @@ class SalesforceConnector(VendorConnector):
         username = credentials.get("username", "")
         password = credentials.get("password", "") + credentials.get("security_token", "")
 
-        login_url = "https://login.salesforce.com/services/Soap/u/59.0"
-        if credentials.get("is_sandbox"):
+        custom_url = credentials.get("login_url", "").strip().rstrip("/")
+        if custom_url:
+            login_url = f"{custom_url}/services/Soap/u/59.0"
+        elif credentials.get("is_sandbox"):
             login_url = "https://test.salesforce.com/services/Soap/u/59.0"
+        else:
+            login_url = "https://login.salesforce.com/services/Soap/u/59.0"
 
         soap_body = f"""<?xml version="1.0" encoding="utf-8" ?>
 <env:Envelope xmlns:xsd="http://www.w3.org/2001/XMLSchema"
