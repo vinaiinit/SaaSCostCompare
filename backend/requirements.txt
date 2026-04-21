@@ -18,3 +18,4 @@ pdfplumber
 alembic
 boto3
 python-docx
+PyPDF2

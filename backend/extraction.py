@@ -149,7 +149,8 @@ def extract_from_pdf(file_path: str, upload_id: str, org_id: int, db: Session) -
     text = extract_text_from_pdf(file_path)
     basename = os.path.basename(file_path)
 
-    if not text or len(text.strip()) < 50:
+    meaningful = text.replace("|", "").replace("-", "").replace(" ", "").replace("\n", "")
+    if not text or len(meaningful) < 30:
         warnings.append(
             f"{basename} appears to be a scanned/image-based PDF. "
             "No text could be extracted. Please upload a text-based PDF or CSV instead."

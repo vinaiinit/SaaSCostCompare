@@ -9,8 +9,29 @@ import zipfile
 import tempfile
 
 
+def _has_meaningful_text(text: str) -> bool:
+    """Check if extracted text contains actual words, not just separators."""
+    stripped = text.replace("|", "").replace("-", "").replace(" ", "").replace("\n", "")
+    return len(stripped) > 30
+
+
 def extract_text_from_pdf(file_path: str) -> str:
-    """Extract text from a PDF file using pdfplumber."""
+    """Extract text from a PDF file. Tries pdfplumber first, falls back to PyPDF2."""
+    text = _extract_with_pdfplumber(file_path)
+    if _has_meaningful_text(text):
+        return text
+
+    # Fallback to PyPDF2
+    fallback = _extract_with_pypdf2(file_path)
+    if _has_meaningful_text(fallback):
+        return fallback
+
+    # Return whichever got more content
+    return fallback if len(fallback) > len(text) else text
+
+
+def _extract_with_pdfplumber(file_path: str) -> str:
+    """Extract text from a PDF using pdfplumber."""
     import pdfplumber
     text_parts = []
     try:
@@ -19,15 +40,32 @@ def extract_text_from_pdf(file_path: str) -> str:
                 page_text = page.extract_text()
                 if page_text:
                     text_parts.append(page_text)
-                # Also try extracting tables
                 tables = page.extract_tables()
                 for table in tables:
                     for row in table:
                         if row:
-                            text_parts.append(" | ".join(str(cell or "") for cell in row))
+                            cells = [str(cell or "").strip() for cell in row]
+                            if any(cells):
+                                text_parts.append(" | ".join(cells))
     except Exception as e:
-        print(f"Error extracting text from PDF {file_path}: {e}")
+        print(f"Error extracting text with pdfplumber {file_path}: {e}")
     return "\n".join(text_parts)
+
+
+def _extract_with_pypdf2(file_path: str) -> str:
+    """Fallback PDF extraction using PyPDF2."""
+    try:
+        from PyPDF2 import PdfReader
+        reader = PdfReader(file_path)
+        text_parts = []
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text_parts.append(page_text)
+        return "\n".join(text_parts)
+    except Exception as e:
+        print(f"Error extracting text with PyPDF2 {file_path}: {e}")
+        return ""
 
 
 def extract_text_from_docx(file_path: str) -> str:
