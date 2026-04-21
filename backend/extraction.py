@@ -225,7 +225,11 @@ extract every pricing line item into this exact JSON format:
 ]
 
 Rules:
-- Only extract what is EXPLICITLY stated in the text. Do NOT infer, estimate, or make up numbers.
+- Extract numbers as plain numbers WITHOUT currency symbols (e.g. 99 not "USD 99").
+- For vendor_name: if not explicitly stated, infer from product names (e.g. "Service Cloud" = "Salesforce", "M365" = "Microsoft", "S/4HANA" = "SAP", "EC2" = "AWS").
+- For billing_frequency: "Monthly unit price" with a 12-month term means "monthly". Use the unit price as-is and set billing_frequency to "monthly".
+- For total_cost: this is the total contract value for that line item.
+- For dates: convert formats like "1/1/25" to "2025-01-01".
 - If a field is not found, use null for optional fields and 0 for numeric fields.
 - If you cannot find ANY pricing line items, return an empty array: []
 - Return ONLY valid JSON, no other text, no markdown, no explanation.
@@ -294,7 +298,9 @@ CONTRACT TEXT:
         return items
 
     except Exception as e:
+        import traceback
         print(f"AI extraction error: {e}")
+        traceback.print_exc()
         return []
 
 
