@@ -308,13 +308,13 @@ export default function Campaign() {
                         <svg className="mx-auto h-8 w-8 text-slate-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                         </svg>
-                        <p className="text-sm text-slate-600">Click to select CSV, PDF, or ZIP</p>
+                        <p className="text-sm text-slate-600">Click to select CSV, PDF, Word, or ZIP</p>
                         <p className="text-xs text-slate-400 mt-1">Max 50MB</p>
                       </div>
                     )}
                     <input
                       type="file"
-                      accept=".csv,.pdf,.zip"
+                      accept=".csv,.pdf,.zip,.doc,.docx"
                       multiple
                       onChange={(e) => setFiles(e.target.files)}
                       className="hidden"

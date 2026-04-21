@@ -17,3 +17,4 @@ reportlab
 pdfplumber
 alembic
 boto3
+python-docx

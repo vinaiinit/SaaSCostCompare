@@ -121,8 +121,8 @@ export default function Dashboard() {
             <div className="mb-5 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
               <p className="font-semibold mb-1">Supported formats</p>
               <p><strong>CSV:</strong> Use the template with columns: <span className="font-mono text-xs">vendor, product_name, sku, quantity, unit_price, total_cost, billing_frequency, currency</span>.</p>
-              <p className="mt-1"><strong>PDF:</strong> Upload contract documents, invoices, or pricing schedules.</p>
-              <p className="mt-1"><strong>ZIP:</strong> Bundle multiple CSV and PDF files into a single archive.</p>
+              <p className="mt-1"><strong>PDF / Word:</strong> Upload contract documents, invoices, or pricing schedules (.pdf, .doc, .docx).</p>
+              <p className="mt-1"><strong>ZIP:</strong> Bundle multiple CSV, PDF, and Word files into a single archive.</p>
             </div>
 
             <div className="mb-4">
@@ -165,12 +165,12 @@ export default function Dashboard() {
                       : 'Select a vendor above to upload'}
                   </p>
                   <p className="text-sm text-slate-600 mt-2">
-                    CSV, PDF, or ZIP &middot; Select one or multiple files &middot; Max 50MB total
+                    CSV, PDF, Word, or ZIP &middot; Select one or multiple files &middot; Max 50MB total
                   </p>
                 </div>
                 <input
                   type="file"
-                  accept=".csv,.pdf,.zip"
+                  accept=".csv,.pdf,.zip,.doc,.docx"
                   multiple
                   onChange={handleFileUpload}
                   disabled={uploading || !vendorName}

@@ -83,7 +83,7 @@ app.add_middleware(
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
-ALLOWED_EXTENSIONS = {".csv", ".pdf", ".zip"}
+ALLOWED_EXTENSIONS = {".csv", ".pdf", ".zip", ".doc", ".docx"}
 
 
 def _safe_org_folder(org: Organization) -> str:

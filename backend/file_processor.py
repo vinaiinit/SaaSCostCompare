@@ -30,6 +30,25 @@ def extract_text_from_pdf(file_path: str) -> str:
     return "\n".join(text_parts)
 
 
+def extract_text_from_docx(file_path: str) -> str:
+    """Extract text from a Word document (.docx) using python-docx."""
+    import docx
+    text_parts = []
+    try:
+        doc = docx.Document(file_path)
+        for para in doc.paragraphs:
+            if para.text.strip():
+                text_parts.append(para.text)
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells]
+                if any(cells):
+                    text_parts.append(" | ".join(cells))
+    except Exception as e:
+        print(f"Error extracting text from DOCX {file_path}: {e}")
+    return "\n".join(text_parts)
+
+
 def parse_csv_to_items(file_path: str) -> list:
     """Parse a CSV file into a list of row dicts."""
     items = []
@@ -56,7 +75,7 @@ def process_zip(zip_path: str, extract_dir: str) -> list:
                 if name.startswith("__MACOSX") or name.startswith("."):
                     continue
                 lower = name.lower()
-                if lower.endswith(".csv") or lower.endswith(".pdf"):
+                if lower.endswith((".csv", ".pdf", ".doc", ".docx")):
                     zf.extract(name, extract_dir)
                     extracted.append(os.path.join(extract_dir, name))
     except Exception as e:

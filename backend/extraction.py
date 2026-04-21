@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from models import ContractLineItem, Report, Organization
 from vendor_normalization import normalize_line_item
-from file_processor import extract_text_from_pdf, process_zip
+from file_processor import extract_text_from_pdf, extract_text_from_docx, process_zip
 
 
 def _parse_float(val) -> float:
@@ -168,6 +168,35 @@ def extract_from_pdf(file_path: str, upload_id: str, org_id: int, db: Session) -
     return items, warnings
 
 
+# ── DOCX extraction (AI structured extraction) ─────────────────────────────
+
+def extract_from_docx(file_path: str, upload_id: str, org_id: int, db: Session) -> tuple[list[ContractLineItem], list[str]]:
+    """
+    Extract text from Word document, then use Claude to parse into structured line items.
+    Returns (items, warnings).
+    """
+    warnings = []
+    text = extract_text_from_docx(file_path)
+    basename = os.path.basename(file_path)
+
+    if not text or len(text.strip()) < 50:
+        warnings.append(
+            f"{basename}: Very little text could be extracted from this Word document. "
+            "Please ensure it contains tabular pricing data."
+        )
+        return [], warnings
+
+    items = _ai_extract_line_items(text, upload_id, org_id, db)
+
+    if not items:
+        warnings.append(
+            f"{basename}: Could not extract structured line items from this Word document. "
+            "The document may not contain tabular pricing data."
+        )
+
+    return items, warnings
+
+
 def _ai_extract_line_items(pdf_text: str, upload_id: str, org_id: int, db: Session) -> list[ContractLineItem]:
     """
     Call Claude to extract structured line items from PDF text.
@@ -305,7 +334,7 @@ def run_extraction(upload_id: str, file_path: str, org_id: int, db: Session) -> 
                 for fname in files:
                     fpath = os.path.join(root, fname)
                     lower = fname.lower()
-                    if lower.endswith((".csv", ".pdf")):
+                    if lower.endswith((".csv", ".pdf", ".doc", ".docx")):
                         files_to_process.append(fpath)
                     elif lower.endswith(".zip"):
                         extracted = process_zip(fpath, root)
@@ -328,6 +357,12 @@ def run_extraction(upload_id: str, file_path: str, org_id: int, db: Session) -> 
                 all_items.extend(items)
                 all_warnings.extend(warnings)
                 file_names.append(f"{basename} (PDF, {len(items)} items extracted)")
+
+            elif lower.endswith((".doc", ".docx")):
+                items, warnings = extract_from_docx(fpath, upload_id, org_id, db)
+                all_items.extend(items)
+                all_warnings.extend(warnings)
+                file_names.append(f"{basename} (Word, {len(items)} items extracted)")
 
         # Store all line items in DB
         for item in all_items:
