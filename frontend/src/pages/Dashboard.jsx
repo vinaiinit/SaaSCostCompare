@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authAPI, reportAPI } from '../api';
+import { authAPI, reportAPI, licenseAPI } from '../api';
 
 const formatDate = (s) => {
   if (!s) return '—';
@@ -179,6 +179,11 @@ export default function Dashboard() {
               </label>
             </div>
           </div>
+        </div>
+
+        {/* Current Licence Analysis Section */}
+        <div className="mb-8">
+          <LicenseAnalysisSection vendors={VENDORS} />
         </div>
 
         {/* Reports Section */}
@@ -514,10 +519,12 @@ function LineItemsPanel({ items }) {
                   <span className={`text-xs px-1.5 py-0.5 rounded ${
                     item.extraction_source === 'csv' ? 'bg-green-50 text-green-700' :
                     item.extraction_source === 'pdf_ai' ? 'bg-purple-50 text-purple-700' :
+                    item.extraction_source === 'pdf_vision' ? 'bg-indigo-50 text-indigo-700' :
                     'bg-slate-100 text-slate-600'
                   }`}>
                     {item.extraction_source === 'csv' ? 'CSV' :
-                     item.extraction_source === 'pdf_ai' ? 'PDF' : item.extraction_source}
+                     item.extraction_source === 'pdf_ai' ? 'PDF' :
+                     item.extraction_source === 'pdf_vision' ? 'PDF (Vision)' : item.extraction_source}
                   </span>
                 </td>
               </tr>
@@ -686,6 +693,337 @@ function BenchmarkPanel({ benchmark }) {
       <div className="bg-slate-50 rounded-lg border border-slate-200 p-5 space-y-1 max-h-[600px] overflow-y-auto">
         {renderMarkdown(benchmark.narrative || benchmark.report)}
       </div>
+    </div>
+  );
+}
+
+
+// ── Current Licence Analysis ────────────────────────────────────────────────
+
+const VENDOR_CREDENTIAL_FIELDS = {
+  'Salesforce': [
+    { key: 'instance_url', label: 'Instance URL', placeholder: 'https://yourorg.salesforce.com', type: 'text' },
+    { key: 'access_token', label: 'Access Token (Session ID)', placeholder: 'Paste your session ID or OAuth token', type: 'password' },
+  ],
+  'Salesforce (Username/Password)': [
+    { key: 'client_id', label: 'Connected App Client ID', placeholder: 'Consumer key from your Connected App', type: 'text' },
+    { key: 'client_secret', label: 'Client Secret', placeholder: 'Consumer secret', type: 'password' },
+    { key: 'username', label: 'Username', placeholder: 'admin@yourorg.com', type: 'text' },
+    { key: 'password', label: 'Password', placeholder: 'Your password', type: 'password' },
+    { key: 'security_token', label: 'Security Token', placeholder: 'From Salesforce settings', type: 'password' },
+  ],
+  'Microsoft (M365/Azure)': [
+    { key: 'tenant_id', label: 'Tenant ID', placeholder: 'Azure AD Tenant ID', type: 'text' },
+    { key: 'client_id', label: 'Application (Client) ID', placeholder: 'From Azure App Registration', type: 'text' },
+    { key: 'client_secret', label: 'Client Secret', placeholder: 'Secret value', type: 'password' },
+  ],
+  'SAP': [
+    { key: 'base_url', label: 'SAP System URL', placeholder: 'https://your-sap-instance.com', type: 'text' },
+    { key: 'access_token', label: 'API Token', placeholder: 'Your SAP API token', type: 'password' },
+  ],
+  'Oracle': [
+    { key: 'instance_url', label: 'Oracle Cloud URL', placeholder: 'https://your-instance.oraclecloud.com', type: 'text' },
+    { key: 'access_token', label: 'Access Token', placeholder: 'Your Oracle API token', type: 'password' },
+  ],
+  'Google Cloud': [
+    { key: 'service_account_key', label: 'Service Account Key (JSON)', placeholder: 'Paste your service account JSON key', type: 'text' },
+  ],
+  'AWS': [
+    { key: 'access_key_id', label: 'Access Key ID', placeholder: 'AKIA...', type: 'text' },
+    { key: 'secret_access_key', label: 'Secret Access Key', placeholder: 'Your secret key', type: 'password' },
+  ],
+};
+
+function LicenseAnalysisSection({ vendors }) {
+  const [expanded, setExpanded] = useState(false);
+  const [selectedVendor, setSelectedVendor] = useState('');
+  const [credentials, setCredentials] = useState({});
+  const [analyzing, setAnalyzing] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [history, setHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  useEffect(() => {
+    if (expanded && history.length === 0) {
+      licenseAPI.list().then(res => setHistory(res.data)).catch(() => {});
+    }
+  }, [expanded]);
+
+  const handleAnalyze = async () => {
+    if (!selectedVendor) return;
+    setAnalyzing(true);
+    setError('');
+    setResult(null);
+
+    try {
+      const res = await licenseAPI.analyze(selectedVendor, credentials);
+      setResult(res.data);
+      setCredentials({});
+      licenseAPI.list().then(r => setHistory(r.data)).catch(() => {});
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to connect. Please check your credentials.');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const credFields = VENDOR_CREDENTIAL_FIELDS[selectedVendor] || [];
+  const isPlaceholder = ['SAP', 'Oracle', 'Google Cloud', 'AWS'].includes(selectedVendor);
+
+  return (
+    <div className="card">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full p-6 flex items-center justify-between text-left"
+      >
+        <div className="flex items-center gap-3">
+          <svg className="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">Current Licence Analysis</h2>
+            <p className="text-sm text-slate-500 mt-0.5">Connect to your vendor admin console to analyse licence utilisation</p>
+          </div>
+        </div>
+        <svg className={`w-5 h-5 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {expanded && (
+        <div className="px-6 pb-6 border-t border-slate-100 pt-4">
+          {/* Vendor Selection */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-slate-700 mb-2">Select Vendor</label>
+            <div className="flex flex-wrap gap-2">
+              {vendors.map((v) => (
+                <button
+                  key={v}
+                  onClick={() => { setSelectedVendor(v); setCredentials({}); setResult(null); setError(''); }}
+                  className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
+                    selectedVendor === v
+                      ? 'bg-primary-600 text-white border-primary-600'
+                      : 'bg-white text-slate-700 border-slate-300 hover:border-primary-400'
+                  }`}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Credential Fields */}
+          {selectedVendor && (
+            <div className="mt-4">
+              {isPlaceholder && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 mb-4">
+                  <p className="font-semibold">{selectedVendor} integration coming soon</p>
+                  <p className="mt-1">Full API connectivity for {selectedVendor} is under development. Currently available: Salesforce and Microsoft (M365/Azure).</p>
+                </div>
+              )}
+
+              {!isPlaceholder && (
+                <>
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800 mb-4">
+                    <p className="font-semibold">How it works</p>
+                    <p className="mt-1">
+                      We connect to your {selectedVendor} admin API using the credentials below to pull licence counts, assignments, and usage data.
+                      Credentials are used once for the API call and are <strong>never stored</strong>.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {credFields.map((field) => (
+                      <div key={field.key}>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">{field.label}</label>
+                        <input
+                          type={field.type}
+                          placeholder={field.placeholder}
+                          value={credentials[field.key] || ''}
+                          onChange={(e) => setCredentials({ ...credentials, [field.key]: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleAnalyze}
+                    disabled={analyzing || credFields.some(f => !credentials[f.key])}
+                    className="mt-4 btn-primary text-sm disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {analyzing ? (
+                      <>
+                        <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                        Connecting to {selectedVendor}...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        Run Licence Analysis
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+              {error}
+            </div>
+          )}
+
+          {/* Results */}
+          {result && (
+            <LicenseResultPanel result={result} />
+          )}
+
+          {/* History */}
+          {history.length > 0 && (
+            <div className="mt-6 border-t border-slate-200 pt-4">
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="text-sm font-medium text-primary-600 hover:text-primary-700"
+              >
+                {showHistory ? 'Hide' : 'Show'} Previous Analyses ({history.length})
+              </button>
+              {showHistory && (
+                <div className="mt-3 space-y-2">
+                  {history.map((h) => (
+                    <div key={h.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg text-sm">
+                      <div>
+                        <span className="font-medium text-slate-900">{h.vendor_name}</span>
+                        <span className="text-slate-500 ml-2">{formatDate(h.created_at)}</span>
+                      </div>
+                      <button
+                        onClick={() => setResult(h.result)}
+                        className="text-primary-600 hover:text-primary-700 text-xs font-medium"
+                      >
+                        View Results
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function LicenseResultPanel({ result }) {
+  if (!result || !result.licenses) return null;
+
+  const licenses = result.licenses || [];
+  const activity = result.login_activity || {};
+  const totalLicenses = licenses.reduce((s, l) => s + (l.total_licenses || 0), 0);
+  const totalUsed = licenses.reduce((s, l) => s + (l.assigned_licenses || 0), 0);
+  const totalUnused = licenses.reduce((s, l) => s + (l.unused_licenses || 0), 0);
+  const overallUtil = totalLicenses > 0 ? Math.round(totalUsed / totalLicenses * 100) : 0;
+
+  return (
+    <div className="mt-4 border-t border-slate-200 pt-4">
+      <h4 className="text-sm font-bold text-slate-900 mb-3">
+        {result.vendor} — Licence Utilisation Summary
+      </h4>
+
+      {result.note && (
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 mb-4">
+          {result.note}
+        </div>
+      )}
+
+      {/* Summary Cards */}
+      {licenses.length > 0 && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="bg-blue-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Total Licences</p>
+              <p className="text-lg font-bold text-blue-700">{totalLicenses.toLocaleString()}</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Assigned</p>
+              <p className="text-lg font-bold text-green-700">{totalUsed.toLocaleString()}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Unused</p>
+              <p className="text-lg font-bold text-red-700">{totalUnused.toLocaleString()}</p>
+            </div>
+            <div className="bg-purple-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Utilisation</p>
+              <p className={`text-lg font-bold ${overallUtil >= 80 ? 'text-green-700' : overallUtil >= 50 ? 'text-amber-700' : 'text-red-700'}`}>
+                {overallUtil}%
+              </p>
+            </div>
+          </div>
+
+          {/* Login Activity */}
+          {(activity.daily_avg_logins > 0 || activity.total_users > 0) && (
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-slate-50 rounded-lg p-3 text-center">
+                <p className="text-xs text-slate-500 mb-1">Avg Daily Logins</p>
+                <p className="text-lg font-bold text-slate-700">{(activity.daily_avg_logins || 0).toLocaleString()}</p>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 text-center">
+                <p className="text-xs text-slate-500 mb-1">Active Users (30d)</p>
+                <p className="text-lg font-bold text-slate-700">{(activity.unique_users_30d || 0).toLocaleString()}</p>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 text-center">
+                <p className="text-xs text-slate-500 mb-1">Total Active Users</p>
+                <p className="text-lg font-bold text-slate-700">{(activity.total_users || 0).toLocaleString()}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Licence Breakdown Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-left">
+                  <th className="px-3 py-2 font-medium text-slate-600">Product / Licence Type</th>
+                  <th className="px-3 py-2 font-medium text-slate-600 text-right">Total</th>
+                  <th className="px-3 py-2 font-medium text-slate-600 text-right">Assigned</th>
+                  <th className="px-3 py-2 font-medium text-slate-600 text-right">Unused</th>
+                  <th className="px-3 py-2 font-medium text-slate-600 text-right">Utilisation</th>
+                </tr>
+              </thead>
+              <tbody>
+                {licenses.map((lic, i) => (
+                  <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="px-3 py-2 font-medium text-slate-900">{lic.product_name}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{(lic.total_licenses || 0).toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{(lic.assigned_licenses || 0).toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{(lic.unused_licenses || 0).toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">
+                      <span className={`font-medium ${
+                        lic.utilization_pct >= 80 ? 'text-green-700' :
+                        lic.utilization_pct >= 50 ? 'text-amber-700' : 'text-red-700'
+                      }`}>
+                        {lic.utilization_pct}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {result.retrieved_at && (
+        <p className="text-xs text-slate-400 mt-3 text-right">
+          Data retrieved: {new Date(result.retrieved_at).toLocaleString()}
+        </p>
+      )}
     </div>
   );
 }

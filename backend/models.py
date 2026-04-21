@@ -206,3 +206,18 @@ class ContactInquiry(Base):
     company = Column(String)
     message = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LicenseAnalysis(Base):
+    __tablename__ = "license_analyses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"))
+    owner_id = Column(Integer, ForeignKey("users.id"))
+    vendor_name = Column(String, index=True)
+    status = Column(String, default="pending")  # pending, connected, failed
+    result = Column(Text)  # JSON: license summary from vendor API
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    organization = relationship("Organization")
+    owner = relationship("User")

@@ -11,7 +11,7 @@ psycopg2-binary
 stripe
 redis
 rq
-anthropic
+anthropic>=0.42.0
 python-dotenv
 reportlab
 pdfplumber
@@ -19,3 +19,5 @@ alembic
 boto3
 python-docx
 PyPDF2
+PyMuPDF
+requests

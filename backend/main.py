@@ -17,7 +17,7 @@ from database import engine, get_db, Base
 from models import (
     User, Organization, Report, BenchmarkReport, PasswordResetToken,
     ContactInquiry, ContractLineItem, VendorCatalog, DataCoverageStats,
-    CampaignSubmission,
+    CampaignSubmission, LicenseAnalysis,
 )
 from auth import hash_password, verify_password, create_access_token, verify_token
 from schemas import (
@@ -845,3 +845,95 @@ def submit_contact(req: ContactRequest, db: Session = Depends(get_db)):
     db.add(inquiry)
     db.commit()
     return {"message": "Thank you for reaching out. We'll get back to you shortly."}
+
+
+# --- License Analysis ---
+
+class LicenseAnalysisRequest(BaseModel):
+    vendor_name: str
+    credentials: dict
+
+@app.post("/license-analysis")
+def run_license_analysis(
+    req: LicenseAnalysisRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from vendor_connectors import get_connector
+
+    connector = get_connector(req.vendor_name)
+    if not connector:
+        raise HTTPException(status_code=400, detail=f"Unsupported vendor: {req.vendor_name}")
+
+    if not connector.authenticate(req.credentials):
+        raise HTTPException(
+            status_code=401,
+            detail=f"Failed to authenticate with {req.vendor_name}. Please check your credentials.",
+        )
+
+    try:
+        summary = connector.get_license_summary()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving license data: {str(e)}")
+
+    analysis = LicenseAnalysis(
+        org_id=current_user.org_id,
+        owner_id=current_user.id,
+        vendor_name=req.vendor_name,
+        status="connected",
+        result=json.dumps(summary),
+    )
+    db.add(analysis)
+    db.commit()
+
+    return summary
+
+
+@app.get("/license-analysis")
+def list_license_analyses(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    analyses = (
+        db.query(LicenseAnalysis)
+        .filter(LicenseAnalysis.org_id == current_user.org_id)
+        .order_by(LicenseAnalysis.created_at.desc())
+        .all()
+    )
+    results = []
+    for a in analyses:
+        data = json.loads(a.result) if a.result else {}
+        results.append({
+            "id": a.id,
+            "vendor_name": a.vendor_name,
+            "status": a.status,
+            "result": data,
+            "created_at": str(a.created_at),
+        })
+    return results
+
+
+@app.get("/license-analysis/{analysis_id}")
+def get_license_analysis(
+    analysis_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    analysis = (
+        db.query(LicenseAnalysis)
+        .filter(
+            LicenseAnalysis.id == analysis_id,
+            LicenseAnalysis.org_id == current_user.org_id,
+        )
+        .first()
+    )
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    data = json.loads(analysis.result) if analysis.result else {}
+    return {
+        "id": analysis.id,
+        "vendor_name": analysis.vendor_name,
+        "status": analysis.status,
+        "result": data,
+        "created_at": str(analysis.created_at),
+    }

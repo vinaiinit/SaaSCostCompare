@@ -111,4 +111,13 @@ export const contactAPI = {
     api.post('/contact', { name, email, company, message }),
 };
 
+export const licenseAPI = {
+  analyze: (vendorName, credentials) =>
+    api.post('/license-analysis', { vendor_name: vendorName, credentials }),
+  list: () =>
+    api.get('/license-analysis'),
+  get: (analysisId) =>
+    api.get(`/license-analysis/${analysisId}`),
+};
+
 export default api;

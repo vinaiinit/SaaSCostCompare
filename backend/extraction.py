@@ -10,6 +10,7 @@ import os
 import json
 import csv
 import io
+import base64
 from datetime import datetime, date
 from sqlalchemy.orm import Session
 
@@ -143,22 +144,24 @@ def extract_from_csv(file_path: str, upload_id: str, org_id: int, db: Session) -
 def extract_from_pdf(file_path: str, upload_id: str, org_id: int, db: Session) -> tuple[list[ContractLineItem], list[str]]:
     """
     Extract text from PDF, then use Claude to parse into structured line items.
+    Falls back to sending the raw PDF to Claude's vision API if text extraction fails.
     Returns (items, warnings).
     """
     warnings = []
-    text = extract_text_from_pdf(file_path)
     basename = os.path.basename(file_path)
 
+    # Try text-based extraction first
+    text = extract_text_from_pdf(file_path)
     meaningful = text.replace("|", "").replace("-", "").replace(" ", "").replace("\n", "")
-    if not text or len(meaningful) < 30:
-        warnings.append(
-            f"{basename} appears to be a scanned/image-based PDF. "
-            "No text could be extracted. Please upload a text-based PDF or CSV instead."
-        )
-        return [], warnings
 
-    # Use Claude for structured extraction only
-    items = _ai_extract_line_items(text, upload_id, org_id, db)
+    items = []
+    if text and len(meaningful) >= 30:
+        items = _ai_extract_line_items(text, upload_id, org_id, db)
+
+    # If text extraction produced nothing, fall back to vision-based PDF reading
+    if not items:
+        print(f"Text extraction failed for {basename}, trying vision-based PDF extraction...")
+        items = _ai_extract_from_pdf_file(file_path, upload_id, org_id, db)
 
     if not items:
         warnings.append(
@@ -303,6 +306,261 @@ CONTRACT TEXT:
         print(f"AI extraction error: {e}")
         traceback.print_exc()
         return []
+
+
+_VISION_EXTRACTION_PROMPT = """You are a contract data extraction tool. Look at this document and
+extract every pricing line item into this exact JSON format:
+
+[
+  {
+    "vendor_name": "string",
+    "product_name": "string",
+    "sku": "string or null",
+    "quantity": number,
+    "unit_price": number,
+    "total_cost": number,
+    "billing_frequency": "monthly" or "annual" or "multi_year",
+    "currency": "USD",
+    "contract_start_date": "YYYY-MM-DD or null",
+    "contract_end_date": "YYYY-MM-DD or null"
+  }
+]
+
+Rules:
+- Extract numbers as plain numbers WITHOUT currency symbols (e.g. 99 not "USD 99").
+- For vendor_name: if not explicitly stated, infer from product names (e.g. "Service Cloud" = "Salesforce", "M365" = "Microsoft", "S/4HANA" = "SAP", "EC2" = "AWS").
+- For billing_frequency: "Monthly unit price" with a 12-month term means "monthly". Use the unit price as-is and set billing_frequency to "monthly".
+- For total_cost: this is the total contract value for that line item.
+- For dates: convert formats like "1/1/25" to "2025-01-01".
+- If a field is not found, use null for optional fields and 0 for numeric fields.
+- If you cannot find ANY pricing line items, return an empty array: []
+- Return ONLY valid JSON, no other text, no markdown, no explanation."""
+
+
+def _ai_extract_from_pdf_file(file_path: str, upload_id: str, org_id: int, db: Session) -> list[ContractLineItem]:
+    """
+    Send the raw PDF to Claude's vision API for direct document reading.
+    Tries document type first, falls back to image-based page rendering.
+    """
+    # Try document-based approach first (requires anthropic SDK >= 0.40)
+    items = _try_pdf_document_extraction(file_path, upload_id, org_id, db)
+    if items:
+        return items
+
+    # Fall back to rendering pages as images
+    print("Document-type extraction failed, trying image-based page rendering...")
+    return _try_pdf_image_extraction(file_path, upload_id, org_id, db)
+
+
+def _try_pdf_document_extraction(file_path: str, upload_id: str, org_id: int, db: Session) -> list[ContractLineItem]:
+    """Send PDF as a document content block to Claude."""
+    import anthropic
+
+    try:
+        with open(file_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        if len(pdf_bytes) > 10 * 1024 * 1024:
+            print(f"PDF too large for vision extraction: {len(pdf_bytes)} bytes")
+            return []
+
+        pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": pdf_b64,
+                        },
+                    },
+                    {"type": "text", "text": _VISION_EXTRACTION_PROMPT},
+                ],
+            }],
+        )
+
+        items = _parse_ai_response_to_items(
+            message.content[0].text, upload_id, org_id, db, "pdf_vision"
+        )
+        print(f"Document extraction found {len(items)} line items")
+        return items
+
+    except Exception as e:
+        import traceback
+        print(f"Document-type PDF extraction error: {e}")
+        traceback.print_exc()
+        return []
+
+
+def _try_pdf_image_extraction(file_path: str, upload_id: str, org_id: int, db: Session) -> list[ContractLineItem]:
+    """Render PDF pages as images and send to Claude vision."""
+    import anthropic
+
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        try:
+            from pdf2image import convert_from_path
+            return _try_pdf_image_extraction_pdf2image(file_path, upload_id, org_id, db)
+        except ImportError:
+            print("Neither PyMuPDF nor pdf2image available for image-based extraction")
+            return _try_pdf_pdfplumber_image_extraction(file_path, upload_id, org_id, db)
+
+    try:
+        doc = fitz.open(file_path)
+        image_blocks = []
+        for page_num in range(min(doc.page_count, 5)):
+            page = doc[page_num]
+            pix = page.get_pixmap(dpi=200)
+            img_bytes = pix.tobytes("png")
+            img_b64 = base64.standard_b64encode(img_bytes).decode("utf-8")
+            image_blocks.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": img_b64,
+                },
+            })
+        doc.close()
+
+        if not image_blocks:
+            return []
+
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        content = image_blocks + [{"type": "text", "text": _VISION_EXTRACTION_PROMPT}]
+
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": content}],
+        )
+
+        items = _parse_ai_response_to_items(
+            message.content[0].text, upload_id, org_id, db, "pdf_vision"
+        )
+        print(f"Image extraction (PyMuPDF) found {len(items)} line items")
+        return items
+
+    except Exception as e:
+        import traceback
+        print(f"Image-based PDF extraction error: {e}")
+        traceback.print_exc()
+        return []
+
+
+def _try_pdf_pdfplumber_image_extraction(file_path: str, upload_id: str, org_id: int, db: Session) -> list[ContractLineItem]:
+    """Last resort: use pdfplumber to render page images."""
+    import anthropic
+
+    try:
+        import pdfplumber
+        from io import BytesIO
+
+        image_blocks = []
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages[:5]:
+                img = page.to_image(resolution=200)
+                buf = BytesIO()
+                img.save(buf, format="PNG")
+                img_b64 = base64.standard_b64encode(buf.getvalue()).decode("utf-8")
+                image_blocks.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": img_b64,
+                    },
+                })
+
+        if not image_blocks:
+            return []
+
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        content = image_blocks + [{"type": "text", "text": _VISION_EXTRACTION_PROMPT}]
+
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": content}],
+        )
+
+        items = _parse_ai_response_to_items(
+            message.content[0].text, upload_id, org_id, db, "pdf_vision"
+        )
+        print(f"Image extraction (pdfplumber) found {len(items)} line items")
+        return items
+
+    except Exception as e:
+        import traceback
+        print(f"Pdfplumber image extraction error: {e}")
+        traceback.print_exc()
+        return []
+
+
+def _parse_ai_response_to_items(
+    response_text: str, upload_id: str, org_id: int, db: Session, source: str
+) -> list[ContractLineItem]:
+    """Parse Claude's JSON response into ContractLineItem objects."""
+    response_text = response_text.strip()
+
+    if response_text.startswith("```"):
+        lines = response_text.split("\n")
+        response_text = "\n".join(lines[1:])
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+
+    parsed = json.loads(response_text)
+    if not isinstance(parsed, list):
+        return []
+
+    items = []
+    for row in parsed:
+        raw_vendor = row.get("vendor_name", "").strip()
+        raw_product = row.get("product_name", "").strip()
+        if not raw_vendor and not raw_product:
+            continue
+
+        vendor, product = normalize_line_item(raw_vendor, raw_product, db)
+
+        unit_price = _parse_float(row.get("unit_price"))
+        total_cost = _parse_float(row.get("total_cost"))
+        quantity = _parse_int(row.get("quantity")) or 1
+        billing_freq = _normalize_billing_frequency(row.get("billing_frequency", "annual"))
+        start_date = _parse_date(row.get("contract_start_date"))
+        end_date = _parse_date(row.get("contract_end_date"))
+
+        cost_per_unit_annual, total_cost_annual = compute_annual_costs(
+            unit_price, total_cost, billing_freq, start_date, end_date
+        )
+
+        item = ContractLineItem(
+            upload_id=upload_id,
+            org_id=org_id,
+            vendor_name=vendor,
+            product_name=product,
+            sku=row.get("sku") or None,
+            quantity=quantity,
+            unit_price=unit_price,
+            total_cost=total_cost,
+            billing_frequency=billing_freq,
+            currency=row.get("currency", "USD") or "USD",
+            contract_start_date=start_date,
+            contract_end_date=end_date,
+            cost_per_unit_annual=cost_per_unit_annual,
+            total_cost_annual=total_cost_annual,
+            extraction_source=source,
+            extraction_confidence=0.85,
+        )
+        items.append(item)
+    return items
 
 
 # ── Main extraction pipeline ─────────────────────────────────────────────────
