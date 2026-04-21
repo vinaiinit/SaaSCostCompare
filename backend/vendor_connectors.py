@@ -76,11 +76,10 @@ class SalesforceConnector(VendorConnector):
 
         username = credentials.get("username", "")
         password = credentials.get("password", "") + credentials.get("security_token", "")
-
         custom_url = credentials.get("login_url", "").strip().rstrip("/")
-        if custom_url:
-            login_url = f"{custom_url}/services/Soap/u/59.0"
-        elif credentials.get("is_sandbox"):
+
+        # SOAP login always goes through login.salesforce.com (not custom domains)
+        if custom_url and "test.salesforce.com" in custom_url:
             login_url = "https://test.salesforce.com/services/Soap/u/59.0"
         else:
             login_url = "https://login.salesforce.com/services/Soap/u/59.0"
@@ -109,7 +108,8 @@ class SalesforceConnector(VendorConnector):
             )
 
             if resp.status_code != 200:
-                print(f"Salesforce SOAP login failed: {resp.status_code}")
+                print(f"Salesforce SOAP login failed: {resp.status_code} URL: {login_url}")
+                print(f"Response: {resp.text[:500]}")
                 return False
 
             body = resp.text
