@@ -65,73 +65,38 @@ class SalesforceConnector(VendorConnector):
             self.instance_url = credentials["instance_url"].rstrip("/")
             return self._verify_connection()
 
-        # SOAP login — just username, password, security token (no Connected App needed)
-        if credentials.get("username") and credentials.get("password"):
-            return self._soap_login(credentials)
+        # Connected App OAuth (username-password flow)
+        if credentials.get("client_id") and credentials.get("username"):
+            return self._oauth_login(credentials)
 
         return False
 
-    def _soap_login(self, credentials: dict) -> bool:
+    def _oauth_login(self, credentials: dict) -> bool:
         import requests
 
-        username = credentials.get("username", "")
-        password = credentials.get("password", "") + credentials.get("security_token", "")
-        custom_url = credentials.get("login_url", "").strip().rstrip("/")
+        token_url = "https://login.salesforce.com/services/oauth2/token"
 
-        # SOAP login always goes through login.salesforce.com (not custom domains)
-        if custom_url and "test.salesforce.com" in custom_url:
-            login_url = "https://test.salesforce.com/services/Soap/u/59.0"
-        else:
-            login_url = "https://login.salesforce.com/services/Soap/u/59.0"
-
-        soap_body = f"""<?xml version="1.0" encoding="utf-8" ?>
-<env:Envelope xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:env="http://schemas.xmlsoap.org/soap/envelope/">
-  <env:Body>
-    <n1:login xmlns:n1="urn:partner.soap.sforce.com">
-      <n1:username>{username}</n1:username>
-      <n1:password>{password}</n1:password>
-    </n1:login>
-  </env:Body>
-</env:Envelope>"""
+        payload = {
+            "grant_type": "password",
+            "client_id": credentials.get("client_id", ""),
+            "client_secret": credentials.get("client_secret", ""),
+            "username": credentials.get("username", ""),
+            "password": credentials.get("password", ""),
+        }
 
         try:
-            resp = requests.post(
-                login_url,
-                data=soap_body,
-                headers={
-                    "Content-Type": "text/xml; charset=UTF-8",
-                    "SOAPAction": "login",
-                },
-                timeout=15,
-            )
-
-            if resp.status_code != 200:
-                print(f"Salesforce SOAP login failed: {resp.status_code} URL: {login_url}")
-                print(f"Response: {resp.text[:500]}")
-                return False
-
-            body = resp.text
-            # Parse session ID and server URL from SOAP response
-            import re
-            session_match = re.search(r"<sessionId>(.+?)</sessionId>", body)
-            server_match = re.search(r"<serverUrl>(.+?)</serverUrl>", body)
-
-            if not session_match or not server_match:
-                print(f"Salesforce SOAP login: could not parse response")
-                return False
-
-            self.access_token = session_match.group(1)
-            server_url = server_match.group(1)
-            # Extract instance URL from server URL (e.g., https://yourorg.my.salesforce.com/...)
-            from urllib.parse import urlparse
-            parsed = urlparse(server_url)
-            self.instance_url = f"{parsed.scheme}://{parsed.netloc}"
-            return True
-
+            resp = requests.post(token_url, data=payload, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                self.access_token = data["access_token"]
+                self.instance_url = data["instance_url"]
+                print(f"Salesforce OAuth login successful: {self.instance_url}")
+                return True
+            print(f"Salesforce OAuth login failed: {resp.status_code}")
+            print(f"Response: {resp.text[:500]}")
+            return False
         except Exception as e:
-            print(f"Salesforce SOAP login error: {e}")
+            print(f"Salesforce OAuth login error: {e}")
             return False
 
     def _verify_connection(self) -> bool:

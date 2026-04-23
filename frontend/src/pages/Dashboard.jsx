@@ -702,10 +702,10 @@ function BenchmarkPanel({ benchmark }) {
 
 const VENDOR_CREDENTIAL_FIELDS = {
   'Salesforce': [
-    { key: 'login_url', label: 'Salesforce Login URL', placeholder: 'https://yourcompany.my.salesforce.com', type: 'text' },
+    { key: 'client_id', label: 'Connected App Consumer Key', placeholder: 'From Setup → App Manager → Your App → View', type: 'text' },
+    { key: 'client_secret', label: 'Consumer Secret', placeholder: 'Consumer secret from your Connected App', type: 'password' },
     { key: 'username', label: 'Salesforce Username', placeholder: 'admin@yourcompany.com', type: 'text' },
-    { key: 'password', label: 'Password', placeholder: 'Your Salesforce password', type: 'password' },
-    { key: 'security_token', label: 'Security Token (optional)', placeholder: 'From Setup → Reset My Security Token', type: 'password', optional: true },
+    { key: 'password', label: 'Password + Security Token', placeholder: 'Your password concatenated with security token', type: 'password' },
   ],
   'Microsoft (M365/Azure)': [
     { key: 'tenant_id', label: 'Tenant ID', placeholder: 'Azure AD Tenant ID', type: 'text' },
