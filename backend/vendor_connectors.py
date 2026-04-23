@@ -74,7 +74,12 @@ class SalesforceConnector(VendorConnector):
     def _oauth_login(self, credentials: dict) -> bool:
         import requests
 
-        token_url = "https://login.salesforce.com/services/oauth2/token"
+        # Try custom login URL first, then standard endpoints
+        login_url = credentials.get("login_url", "").strip().rstrip("/")
+        urls_to_try = []
+        if login_url:
+            urls_to_try.append(f"{login_url}/services/oauth2/token")
+        urls_to_try.append("https://login.salesforce.com/services/oauth2/token")
 
         payload = {
             "grant_type": "password",
@@ -84,20 +89,21 @@ class SalesforceConnector(VendorConnector):
             "password": credentials.get("password", ""),
         }
 
-        try:
-            resp = requests.post(token_url, data=payload, timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                self.access_token = data["access_token"]
-                self.instance_url = data["instance_url"]
-                print(f"Salesforce OAuth login successful: {self.instance_url}")
-                return True
-            print(f"Salesforce OAuth login failed: {resp.status_code}")
-            print(f"Response: {resp.text[:500]}")
-            return False
-        except Exception as e:
-            print(f"Salesforce OAuth login error: {e}")
-            return False
+        for token_url in urls_to_try:
+            try:
+                resp = requests.post(token_url, data=payload, timeout=15)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    self.access_token = data["access_token"]
+                    self.instance_url = data["instance_url"]
+                    print(f"Salesforce OAuth login successful: {self.instance_url}")
+                    return True
+                print(f"Salesforce OAuth failed at {token_url}: {resp.status_code}")
+                print(f"Response: {resp.text[:500]}")
+            except Exception as e:
+                print(f"Salesforce OAuth error at {token_url}: {e}")
+
+        return False
 
     def _verify_connection(self) -> bool:
         import requests

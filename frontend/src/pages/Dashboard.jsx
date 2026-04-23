@@ -702,6 +702,7 @@ function BenchmarkPanel({ benchmark }) {
 
 const VENDOR_CREDENTIAL_FIELDS = {
   'Salesforce': [
+    { key: 'login_url', label: 'Salesforce Instance URL', placeholder: 'https://yourorg.my.salesforce.com', type: 'text' },
     { key: 'client_id', label: 'Connected App Consumer Key', placeholder: 'From Setup → App Manager → Your App → View', type: 'text' },
     { key: 'client_secret', label: 'Consumer Secret', placeholder: 'Consumer secret from your Connected App', type: 'password' },
     { key: 'username', label: 'Salesforce Username', placeholder: 'admin@yourcompany.com', type: 'text' },
