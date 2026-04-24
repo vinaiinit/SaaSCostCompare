@@ -10,6 +10,7 @@ from datetime import timedelta
 import uuid
 import os
 import json
+import re
 import threading
 from pydantic import BaseModel
 
@@ -17,9 +18,10 @@ from database import engine, get_db, Base
 from models import (
     User, Organization, Report, BenchmarkReport, PasswordResetToken,
     ContactInquiry, ContractLineItem, VendorCatalog, DataCoverageStats,
-    CampaignSubmission, LicenseAnalysis,
+    CampaignSubmission, LicenseAnalysis, AuditLog,
 )
 from auth import hash_password, verify_password, create_access_token, verify_token
+from audit import log_event
 from schemas import (
     OrgCreate,
     OrgResponse,
@@ -79,6 +81,42 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+# Rate limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _validate_password(password: str) -> None:
+    errors = []
+    if len(password) < 8:
+        errors.append("at least 8 characters")
+    if not re.search(r"[A-Z]", password):
+        errors.append("one uppercase letter")
+    if not re.search(r"[a-z]", password):
+        errors.append("one lowercase letter")
+    if not re.search(r"\d", password):
+        errors.append("one digit")
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+        errors.append("one special character")
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must contain: {', '.join(errors)}.",
+        )
+
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -146,7 +184,9 @@ def get_organization(org_id: int, db: Session = Depends(get_db)):
 
 # --- User endpoints ---
 @app.post("/register", response_model=UserResponse)
-def register_user(user: UserCreate, db: Session = Depends(get_db)):
+def register_user(user: UserCreate, request: Request, db: Session = Depends(get_db)):
+    _validate_password(user.password)
+
     existing_user = db.query(User).filter(User.email == user.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -160,18 +200,29 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
+
+    log_event(db, action="user.register", user_id=db_user.id,
+              resource_type="user", resource_id=str(db_user.id),
+              ip_address=_get_client_ip(request))
     return db_user
 
 
 @app.post("/login", response_model=TokenResponse)
-def login(credentials: LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def login(request: Request, credentials: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email).first()
     if not user or not verify_password(credentials.password, user.hashed_password):
+        log_event(db, action="login.failed", detail=f"email={credentials.email}",
+                  ip_address=_get_client_ip(request))
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     access_token = create_access_token(
         data={"sub": user.id}, expires_delta=timedelta(hours=24)
     )
+
+    log_event(db, action="login.success", user_id=user.id,
+              resource_type="user", resource_id=str(user.id),
+              ip_address=_get_client_ip(request))
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -187,7 +238,8 @@ def get_current_user(
 
 # --- Password reset endpoints ---
 @app.post("/forgot-password")
-def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+@limiter.limit("3/minute")
+def forgot_password(request: Request, req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     from email_utils import send_password_reset_email
     import secrets
     from datetime import datetime
@@ -231,8 +283,7 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
         db.commit()
         raise HTTPException(status_code=400, detail="Reset link has expired. Please request a new one.")
 
-    if len(req.new_password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    _validate_password(req.new_password)
 
     user = db.query(User).filter(User.id == reset_token.user_id).first()
     if not user:
@@ -248,6 +299,7 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
 # --- Upload endpoint (extraction, not AI analysis) ---
 @app.post("/upload")
 async def upload_report(
+    request: Request,
     files: List[UploadFile] = File(...),
     category: str = Form(...),
     user_id: int = Depends(verify_token),
@@ -327,6 +379,11 @@ async def upload_report(
 
     # Enqueue extraction (not AI analysis)
     job_id = _try_enqueue(file_id, stored_path, user.org_id)
+
+    log_event(db, action="file.upload", user_id=user_id,
+              resource_type="report", resource_id=file_id,
+              detail=f"files={len(filenames)}, vendor={category}",
+              ip_address=_get_client_ip(request))
 
     return {
         "id": file_id,
@@ -771,6 +828,7 @@ def download_report(
 @app.get("/download/{report_id}/full-report")
 def download_full_report(
     report_id: str,
+    request: Request,
     user_id: int = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
@@ -779,6 +837,10 @@ def download_full_report(
     report = db.query(Report).filter(Report.id == report_id).first()
     if not report or report.owner_id != user_id:
         raise HTTPException(status_code=404, detail="Report not found")
+
+    log_event(db, action="report.download", user_id=user_id,
+              resource_type="report", resource_id=report_id,
+              ip_address=_get_client_ip(request))
 
     org = db.query(Organization).filter(Organization.id == report.org_id).first()
     benchmark = db.query(BenchmarkReport).filter(BenchmarkReport.report_id == report_id).first()
@@ -897,6 +959,7 @@ class LicenseAnalysisRequest(BaseModel):
 @app.post("/license-analysis")
 def run_license_analysis(
     req: LicenseAnalysisRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -907,6 +970,9 @@ def run_license_analysis(
         raise HTTPException(status_code=400, detail=f"Unsupported vendor: {req.vendor_name}")
 
     if not connector.authenticate(req.credentials):
+        log_event(db, action="license_analysis.auth_failed", user_id=current_user.id,
+                  resource_type="vendor", resource_id=req.vendor_name,
+                  ip_address=_get_client_ip(request))
         raise HTTPException(
             status_code=401,
             detail=f"Failed to authenticate with {req.vendor_name}. Please check your credentials.",
@@ -927,6 +993,9 @@ def run_license_analysis(
     db.add(analysis)
     db.commit()
 
+    log_event(db, action="license_analysis.completed", user_id=current_user.id,
+              resource_type="license_analysis", resource_id=str(analysis.id),
+              detail=f"vendor={req.vendor_name}", ip_address=_get_client_ip(request))
     return summary
 
 

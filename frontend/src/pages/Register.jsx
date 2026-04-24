@@ -232,7 +232,9 @@ export default function Register() {
                   placeholder="••••••••"
                   required
                   disabled={loading}
+                  minLength={8}
                 />
+                <p className="text-xs text-slate-500 mt-1">Min 8 chars, with uppercase, lowercase, digit, and special character.</p>
               </div>
 
               <div className="flex gap-3">

@@ -114,17 +114,14 @@ class SalesforceConnector(VendorConnector):
                 data = resp.json()
                 self.access_token = data["access_token"]
                 self.instance_url = data["instance_url"]
-                print(f"Salesforce JWT bearer login successful: {self.instance_url}")
+                print(f"Salesforce JWT bearer login successful")
                 return True
 
             print(f"Salesforce JWT bearer login failed: {resp.status_code}")
-            print(f"Response: {resp.text[:500]}")
             return False
 
         except Exception as e:
-            import traceback
-            print(f"Salesforce JWT bearer error: {e}")
-            traceback.print_exc()
+            print(f"Salesforce JWT bearer error: {type(e).__name__}")
             return False
 
     def _oauth_login(self, credentials: dict) -> bool:
@@ -151,12 +148,11 @@ class SalesforceConnector(VendorConnector):
                     data = resp.json()
                     self.access_token = data["access_token"]
                     self.instance_url = data["instance_url"]
-                    print(f"Salesforce OAuth login successful: {self.instance_url}")
+                    print(f"Salesforce OAuth login successful")
                     return True
-                print(f"Salesforce OAuth failed at {token_url}: {resp.status_code}")
-                print(f"Response: {resp.text[:500]}")
+                print(f"Salesforce OAuth failed: {resp.status_code}")
             except Exception as e:
-                print(f"Salesforce OAuth error at {token_url}: {e}")
+                print(f"Salesforce OAuth error: {type(e).__name__}")
 
         return False
 
@@ -182,7 +178,7 @@ class SalesforceConnector(VendorConnector):
             timeout=15,
         )
         if resp.status_code != 200:
-            print(f"Salesforce query failed: {resp.status_code} {resp.text[:200]}")
+            print(f"Salesforce query failed: {resp.status_code}")
             return []
         return resp.json().get("records", [])
 
@@ -283,10 +279,10 @@ class MicrosoftConnector(VendorConnector):
             if resp.status_code == 200:
                 self.access_token = resp.json()["access_token"]
                 return True
-            print(f"Microsoft auth failed: {resp.status_code} {resp.text[:200]}")
+            print(f"Microsoft auth failed: {resp.status_code}")
             return False
         except Exception as e:
-            print(f"Microsoft auth error: {e}")
+            print(f"Microsoft auth error: {type(e).__name__}")
             return False
 
     def _verify_connection(self) -> bool:
@@ -309,7 +305,7 @@ class MicrosoftConnector(VendorConnector):
             timeout=15,
         )
         if resp.status_code != 200:
-            print(f"Microsoft Graph failed: {resp.status_code} {resp.text[:200]}")
+            print(f"Microsoft Graph failed: {resp.status_code}")
             return {}
         return resp.json()
 
@@ -442,9 +438,9 @@ class SAPConnector(VendorConnector):
                     self.access_token = resp.json().get("access_token")
                     self._auth_header = {"Authorization": f"Bearer {self.access_token}"}
                     return self._verify_connection()
-                print(f"SAP OAuth failed: {resp.status_code} {resp.text[:300]}")
+                print(f"SAP OAuth failed: {resp.status_code}")
             except Exception as e:
-                print(f"SAP OAuth error: {e}")
+                print(f"SAP OAuth error: {type(e).__name__}")
             return False
 
         return False
@@ -460,7 +456,7 @@ class SAPConnector(VendorConnector):
             )
             return resp.status_code == 200
         except Exception as e:
-            print(f"SAP connection verify failed: {e}")
+            print(f"SAP connection verify failed: {type(e).__name__}")
             return False
 
     def _odata_get(self, path: str, params: dict = None) -> dict:
@@ -479,9 +475,9 @@ class SAPConnector(VendorConnector):
             )
             if resp.status_code == 200:
                 return resp.json()
-            print(f"SAP OData request failed: {resp.status_code} {url}")
+            print(f"SAP OData request failed: {resp.status_code}")
         except Exception as e:
-            print(f"SAP OData error: {e}")
+            print(f"SAP OData error: {type(e).__name__}")
         return {}
 
     def get_license_summary(self) -> dict:
@@ -689,7 +685,7 @@ class OracleConnector(VendorConnector):
             identity.get_tenancy(tenancy)
             return True
         except Exception as e:
-            print(f"Oracle OCI auth failed: {e}")
+            print(f"Oracle OCI auth failed: {type(e).__name__}")
             return False
 
     def get_license_summary(self) -> dict:
@@ -777,7 +773,7 @@ class OracleConnector(VendorConnector):
             return result
 
         except Exception as e:
-            print(f"Oracle cost analysis error: {e}")
+            print(f"Oracle cost analysis error: {type(e).__name__}")
             return []
 
     def _get_compute_instances(self, oci) -> dict:
@@ -805,7 +801,7 @@ class OracleConnector(VendorConnector):
                 "shapes": dict(sorted(shapes.items(), key=lambda x: -x[1])[:10]),
             }
         except Exception as e:
-            print(f"Oracle compute error: {e}")
+            print(f"Oracle compute error: {type(e).__name__}")
             return {"total_instances": 0, "running": 0, "stopped": 0, "shapes": {}}
 
     def _get_storage_waste(self, oci) -> dict:
@@ -834,7 +830,7 @@ class OracleConnector(VendorConnector):
                 "estimated_waste": round(unattached_gb * 0.025, 2),  # ~$0.025/GB/month for block storage
             }
         except Exception as e:
-            print(f"Oracle storage error: {e}")
+            print(f"Oracle storage error: {type(e).__name__}")
             return {"total_volumes": 0, "unattached_volumes": 0, "unattached_size_gb": 0, "estimated_waste": 0}
 
     def _get_iam_summary(self, oci) -> dict:
@@ -872,7 +868,7 @@ class OracleConnector(VendorConnector):
                 "total_groups": len(groups),
             }
         except Exception as e:
-            print(f"Oracle IAM error: {e}")
+            print(f"Oracle IAM error: {type(e).__name__}")
             return {"total_users": 0, "active_users": 0}
 
     def _get_demo_data(self) -> dict:
@@ -997,10 +993,10 @@ class GoogleCloudConnector(VendorConnector):
             if resp.status_code == 200:
                 self.access_token = resp.json()["access_token"]
                 return True
-            print(f"Google Cloud auth failed: {resp.status_code} {resp.text[:300]}")
+            print(f"Google Cloud auth failed: {resp.status_code}")
             return False
         except Exception as e:
-            print(f"Google Cloud auth error: {e}")
+            print(f"Google Cloud auth error: {type(e).__name__}")
             return False
 
     def _get(self, url: str) -> dict:
@@ -1013,9 +1009,9 @@ class GoogleCloudConnector(VendorConnector):
             )
             if resp.status_code == 200:
                 return resp.json()
-            print(f"GCP API failed: {resp.status_code} {url}")
+            print(f"GCP API failed: {resp.status_code}")
         except Exception as e:
-            print(f"GCP API error: {e}")
+            print(f"GCP API error: {type(e).__name__}")
         return {}
 
     def get_license_summary(self) -> dict:
@@ -1247,7 +1243,7 @@ class AWSConnector(VendorConnector):
             sts.get_caller_identity()
             return True
         except Exception as e:
-            print(f"AWS auth failed: {e}")
+            print(f"AWS auth failed: {type(e).__name__}")
             return False
 
     def get_license_summary(self) -> dict:
@@ -1336,7 +1332,7 @@ class AWSConnector(VendorConnector):
             return result
 
         except Exception as e:
-            print(f"AWS Cost Explorer error: {e}")
+            print(f"AWS Cost Explorer error: {type(e).__name__}")
             return []
 
     def _get_reservation_utilization(self) -> dict:
@@ -1369,7 +1365,7 @@ class AWSConnector(VendorConnector):
             }
 
         except Exception as e:
-            print(f"AWS RI utilization error: {e}")
+            print(f"AWS RI utilization error: {type(e).__name__}")
             return {"has_reservations": False, "utilization_pct": 0}
 
     def _get_idle_resources(self) -> dict:
@@ -1401,7 +1397,7 @@ class AWSConnector(VendorConnector):
             idle["estimated_waste"] = round(idle["estimated_waste"], 2)
 
         except Exception as e:
-            print(f"AWS idle resources error: {e}")
+            print(f"AWS idle resources error: {type(e).__name__}")
 
         return idle
 
@@ -1454,7 +1450,7 @@ class AWSConnector(VendorConnector):
             }
 
         except Exception as e:
-            print(f"AWS IAM error: {e}")
+            print(f"AWS IAM error: {type(e).__name__}")
             return {"total_users": 0, "active_users_90d": 0}
 
     def _get_demo_data(self) -> dict:
