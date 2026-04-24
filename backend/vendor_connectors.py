@@ -650,20 +650,290 @@ class SAPConnector(VendorConnector):
 
 
 class OracleConnector(VendorConnector):
-    """Placeholder connector for Oracle license data."""
+    """Connect to Oracle Cloud Infrastructure APIs for cost, compute, and IAM analysis."""
 
     vendor_name = "Oracle"
 
+    def __init__(self):
+        self.config = None
+        self.demo_mode = False
+
     def authenticate(self, credentials: dict) -> bool:
-        return bool(credentials.get("access_token") or credentials.get("username"))
+        if credentials.get("demo_mode"):
+            self.demo_mode = True
+            return True
+
+        tenancy = credentials.get("tenancy_ocid", "").strip()
+        user = credentials.get("user_ocid", "").strip()
+        fingerprint = credentials.get("fingerprint", "").strip()
+        private_key = credentials.get("private_key", "").strip()
+        region = credentials.get("region", "us-ashburn-1").strip()
+
+        if not all([tenancy, user, fingerprint, private_key]):
+            return False
+
+        if "\\n" in private_key:
+            private_key = private_key.replace("\\n", "\n")
+
+        try:
+            import oci
+            self.config = {
+                "user": user,
+                "key_content": private_key,
+                "fingerprint": fingerprint,
+                "tenancy": tenancy,
+                "region": region,
+            }
+            oci.config.validate_config(self.config)
+            identity = oci.identity.IdentityClient(self.config)
+            identity.get_tenancy(tenancy)
+            return True
+        except Exception as e:
+            print(f"Oracle OCI auth failed: {e}")
+            return False
 
     def get_license_summary(self) -> dict:
+        if self.demo_mode:
+            return self._get_demo_data()
+
+        import oci
+
+        cost_data = self._get_cost_breakdown(oci)
+        compute_data = self._get_compute_instances(oci)
+        storage_data = self._get_storage_waste(oci)
+        iam_data = self._get_iam_summary(oci)
+
+        licenses = []
+        for svc in cost_data:
+            licenses.append({
+                "product_name": svc["service"],
+                "total_licenses": 0,
+                "assigned_licenses": 0,
+                "active_users": 0,
+                "unused_licenses": 0,
+                "utilization_pct": 0,
+                "monthly_cost": svc["monthly_cost"],
+            })
+
         return {
             "vendor": "Oracle",
-            "licenses": [],
-            "login_activity": {"daily_avg_logins": 0, "unique_users_30d": 0, "total_users": 0},
+            "report_type": "cloud_cost",
+            "cost_summary": {
+                "total_monthly": sum(s["monthly_cost"] for s in cost_data),
+                "top_services": cost_data[:10],
+            },
+            "compute": compute_data,
+            "storage_waste": storage_data,
+            "iam_summary": iam_data,
+            "licenses": licenses[:10],
+            "login_activity": {
+                "daily_avg_logins": 0,
+                "unique_users_30d": iam_data.get("active_users", 0),
+                "total_users": iam_data.get("total_users", 0),
+            },
             "retrieved_at": datetime.utcnow().isoformat(),
-            "note": "Oracle license analysis via Oracle Cloud Infrastructure API. Full integration coming soon.",
+        }
+
+    def _get_cost_breakdown(self, oci) -> list:
+        try:
+            usage_client = oci.usage_api.UsageapiClient(self.config)
+            end = datetime.utcnow().replace(day=1)
+            start = (end - timedelta(days=180)).replace(day=1)
+
+            request = oci.usage_api.models.RequestSummarizedUsagesDetails(
+                tenant_id=self.config["tenancy"],
+                time_usage_started=start.strftime("%Y-%m-%dT00:00:00Z"),
+                time_usage_ended=end.strftime("%Y-%m-%dT00:00:00Z"),
+                granularity="MONTHLY",
+                query_type="COST",
+                group_by=["service"],
+            )
+
+            resp = usage_client.request_summarized_usages(request)
+            service_costs = {}
+            for item in resp.data.items:
+                service = item.service or "Other"
+                cost = float(item.computed_amount or 0)
+                if service not in service_costs:
+                    service_costs[service] = {"total": 0, "months": []}
+                service_costs[service]["total"] += cost
+                service_costs[service]["months"].append(round(cost, 2))
+
+            num_months = max(len(set(
+                item.time_usage_started for item in resp.data.items
+            )), 1)
+
+            result = []
+            for service, data in service_costs.items():
+                if data["total"] < 1:
+                    continue
+                result.append({
+                    "service": service,
+                    "monthly_cost": round(data["total"] / num_months, 2),
+                    "total_6m": round(data["total"], 2),
+                    "trend_6m": data["months"][:6],
+                })
+            result.sort(key=lambda x: x["monthly_cost"], reverse=True)
+            return result
+
+        except Exception as e:
+            print(f"Oracle cost analysis error: {e}")
+            return []
+
+    def _get_compute_instances(self, oci) -> dict:
+        try:
+            compute_client = oci.core.ComputeClient(self.config)
+            compartment_id = self.config["tenancy"]
+
+            instances = []
+            resp = compute_client.list_instances(compartment_id, lifecycle_state="RUNNING")
+            instances.extend(resp.data)
+            resp_stopped = compute_client.list_instances(compartment_id, lifecycle_state="STOPPED")
+            instances.extend(resp_stopped.data)
+
+            running = sum(1 for i in instances if i.lifecycle_state == "RUNNING")
+            stopped = sum(1 for i in instances if i.lifecycle_state == "STOPPED")
+            shapes = {}
+            for inst in instances:
+                shape = inst.shape or "Unknown"
+                shapes[shape] = shapes.get(shape, 0) + 1
+
+            return {
+                "total_instances": len(instances),
+                "running": running,
+                "stopped": stopped,
+                "shapes": dict(sorted(shapes.items(), key=lambda x: -x[1])[:10]),
+            }
+        except Exception as e:
+            print(f"Oracle compute error: {e}")
+            return {"total_instances": 0, "running": 0, "stopped": 0, "shapes": {}}
+
+    def _get_storage_waste(self, oci) -> dict:
+        try:
+            block_client = oci.core.BlockstorageClient(self.config)
+            compartment_id = self.config["tenancy"]
+
+            volumes = block_client.list_volumes(compartment_id, lifecycle_state="AVAILABLE").data
+            unattached = 0
+            unattached_gb = 0
+            for vol in volumes:
+                if not getattr(vol, "is_attached", True):
+                    unattached += 1
+                    unattached_gb += vol.size_in_gbs or 0
+
+            # OCI volumes without attachments show as AVAILABLE
+            # Also count all AVAILABLE volumes as potentially unattached
+            if unattached == 0:
+                unattached = len(volumes)
+                unattached_gb = sum(v.size_in_gbs or 0 for v in volumes)
+
+            return {
+                "total_volumes": len(volumes) if volumes else 0,
+                "unattached_volumes": unattached,
+                "unattached_size_gb": unattached_gb,
+                "estimated_waste": round(unattached_gb * 0.025, 2),  # ~$0.025/GB/month for block storage
+            }
+        except Exception as e:
+            print(f"Oracle storage error: {e}")
+            return {"total_volumes": 0, "unattached_volumes": 0, "unattached_size_gb": 0, "estimated_waste": 0}
+
+    def _get_iam_summary(self, oci) -> dict:
+        try:
+            identity = oci.identity.IdentityClient(self.config)
+            compartment_id = self.config["tenancy"]
+
+            users = identity.list_users(compartment_id).data
+            total = len(users)
+            active = sum(1 for u in users if u.lifecycle_state == "ACTIVE")
+            inactive = sum(1 for u in users if u.lifecycle_state == "INACTIVE")
+
+            ninety_days_ago = datetime.utcnow() - timedelta(days=90)
+            old_api_keys = 0
+            for user in users:
+                if user.lifecycle_state != "ACTIVE":
+                    continue
+                try:
+                    keys = identity.list_api_keys(user.id).data
+                    for key in keys:
+                        if key.lifecycle_state == "ACTIVE" and key.time_created:
+                            created = key.time_created.replace(tzinfo=None) if hasattr(key.time_created, 'replace') else key.time_created
+                            if created < ninety_days_ago:
+                                old_api_keys += 1
+                except Exception:
+                    pass
+
+            groups = identity.list_groups(compartment_id).data
+
+            return {
+                "total_users": total,
+                "active_users": active,
+                "inactive_users": inactive,
+                "old_api_keys": old_api_keys,
+                "total_groups": len(groups),
+            }
+        except Exception as e:
+            print(f"Oracle IAM error: {e}")
+            return {"total_users": 0, "active_users": 0}
+
+    def _get_demo_data(self) -> dict:
+        return {
+            "vendor": "Oracle",
+            "demo_mode": True,
+            "report_type": "cloud_cost",
+            "cost_summary": {
+                "total_monthly": 38900,
+                "top_services": [
+                    {"service": "Compute", "monthly_cost": 14200, "total_6m": 85200, "trend_6m": [13000, 13400, 13800, 14000, 14100, 14200]},
+                    {"service": "Oracle Database Cloud", "monthly_cost": 9800, "total_6m": 58800, "trend_6m": [9200, 9400, 9500, 9600, 9700, 9800]},
+                    {"service": "Object Storage", "monthly_cost": 3600, "total_6m": 21600, "trend_6m": [3100, 3200, 3300, 3400, 3500, 3600]},
+                    {"service": "Block Volume", "monthly_cost": 3200, "total_6m": 19200, "trend_6m": [3000, 3100, 3100, 3200, 3200, 3200]},
+                    {"service": "Networking", "monthly_cost": 2800, "total_6m": 16800, "trend_6m": [2500, 2600, 2700, 2700, 2800, 2800]},
+                    {"service": "Oracle Kubernetes Engine", "monthly_cost": 2200, "total_6m": 13200, "trend_6m": [1800, 1900, 2000, 2100, 2150, 2200]},
+                    {"service": "Oracle Integration Cloud", "monthly_cost": 1500, "total_6m": 9000, "trend_6m": [1500, 1500, 1500, 1500, 1500, 1500]},
+                    {"service": "Oracle Analytics Cloud", "monthly_cost": 1000, "total_6m": 6000, "trend_6m": [800, 850, 900, 950, 980, 1000]},
+                    {"service": "Load Balancer", "monthly_cost": 350, "total_6m": 2100, "trend_6m": [300, 310, 320, 330, 340, 350]},
+                    {"service": "DNS / Traffic Management", "monthly_cost": 250, "total_6m": 1500, "trend_6m": [250, 250, 250, 250, 250, 250]},
+                ],
+            },
+            "compute": {
+                "total_instances": 62,
+                "running": 45,
+                "stopped": 17,
+                "shapes": {
+                    "VM.Standard.E4.Flex": 18,
+                    "VM.Standard3.Flex": 14,
+                    "VM.Standard.E3.Flex": 10,
+                    "BM.Standard3.64": 4,
+                    "VM.GPU3.1": 3,
+                    "VM.Standard.A1.Flex": 8,
+                    "VM.DenseIO.E4.Flex": 3,
+                    "VM.Optimized3.Flex": 2,
+                },
+            },
+            "storage_waste": {
+                "total_volumes": 98,
+                "unattached_volumes": 22,
+                "unattached_size_gb": 5500,
+                "estimated_waste": 137.5,
+            },
+            "iam_summary": {
+                "total_users": 120,
+                "active_users": 98,
+                "inactive_users": 22,
+                "old_api_keys": 18,
+                "total_groups": 15,
+            },
+            "licenses": [
+                {"product_name": "Compute", "total_licenses": 0, "assigned_licenses": 0, "active_users": 0, "unused_licenses": 0, "utilization_pct": 0, "monthly_cost": 14200},
+                {"product_name": "Oracle Database Cloud", "total_licenses": 0, "assigned_licenses": 0, "active_users": 0, "unused_licenses": 0, "utilization_pct": 0, "monthly_cost": 9800},
+                {"product_name": "Object Storage", "total_licenses": 0, "assigned_licenses": 0, "active_users": 0, "unused_licenses": 0, "utilization_pct": 0, "monthly_cost": 3600},
+            ],
+            "login_activity": {
+                "daily_avg_logins": 0,
+                "unique_users_30d": 98,
+                "total_users": 120,
+            },
+            "retrieved_at": datetime.utcnow().isoformat(),
         }
 
 

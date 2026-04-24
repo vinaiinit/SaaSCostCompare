@@ -731,8 +731,11 @@ const VENDOR_CREDENTIAL_FIELDS = {
     { key: 'password', label: 'Password', placeholder: 'SAP password', type: 'password' },
   ],
   'Oracle': [
-    { key: 'instance_url', label: 'Oracle Cloud URL', placeholder: 'https://your-instance.oraclecloud.com', type: 'text' },
-    { key: 'access_token', label: 'Access Token', placeholder: 'Your Oracle API token', type: 'password' },
+    { key: 'tenancy_ocid', label: 'Tenancy OCID', placeholder: 'ocid1.tenancy.oc1..aaaa...', type: 'text' },
+    { key: 'user_ocid', label: 'User OCID', placeholder: 'ocid1.user.oc1..aaaa...', type: 'text' },
+    { key: 'fingerprint', label: 'API Key Fingerprint', placeholder: 'aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99', type: 'text' },
+    { key: 'private_key', label: 'Private Key (PEM)', placeholder: 'Paste your API signing key including BEGIN/END lines', type: 'textarea' },
+    { key: 'region', label: 'Region', placeholder: 'us-ashburn-1', type: 'text' },
   ],
   'Google Cloud': [
     { key: 'service_account_key', label: 'Service Account Key (JSON)', placeholder: '{"type": "service_account", "project_id": "...", ...}', type: 'textarea' },
@@ -869,8 +872,6 @@ function LicenseAnalysisSection({ vendors }) {
   const credKey = selectedVendor === 'Salesforce' ? `Salesforce_${authMethod}`
     : selectedVendor === 'SAP' ? `SAP_${authMethod}` : selectedVendor;
   const credFields = VENDOR_CREDENTIAL_FIELDS[credKey] || [];
-  const isPlaceholder = ['Oracle'].includes(selectedVendor);
-
   return (
     <div className="card">
       <button
@@ -900,7 +901,7 @@ function LicenseAnalysisSection({ vendors }) {
               {vendors.map((v) => (
                 <button
                   key={v}
-                  onClick={() => { setSelectedVendor(v); setAuthMethod(v === 'SAP' ? 'oauth' : v === 'AWS' ? 'keys' : v === 'Google Cloud' ? 'sa' : 'jwt'); setCredentials({}); setResult(null); setError(''); }}
+                  onClick={() => { setSelectedVendor(v); setAuthMethod(v === 'SAP' ? 'oauth' : v === 'AWS' ? 'keys' : v === 'Google Cloud' ? 'sa' : v === 'Oracle' ? 'apikey' : 'jwt'); setCredentials({}); setResult(null); setError(''); }}
                   className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
                     selectedVendor === v
                       ? 'bg-primary-600 text-white border-primary-600'
@@ -916,17 +917,9 @@ function LicenseAnalysisSection({ vendors }) {
           {/* Credential Fields */}
           {selectedVendor && (
             <div className="mt-4">
-              {isPlaceholder && (
-                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 mb-4">
-                  <p className="font-semibold">{selectedVendor} integration coming soon</p>
-                  <p className="mt-1">Full API connectivity for {selectedVendor} is under development. Currently available: Salesforce and Microsoft (M365/Azure).</p>
-                </div>
-              )}
-
-              {!isPlaceholder && (
-                <>
-                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800 mb-4">
-                    <p className="font-semibold">How it works</p>
+              <>
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800 mb-4">
+                  <p className="font-semibold">How it works</p>
                     <p className="mt-1">
                       We connect to your {selectedVendor} admin API using the credentials below to pull licence counts, assignments, and usage data.
                       Credentials are used once for the API call and are <strong>never stored</strong>.
@@ -1067,6 +1060,38 @@ function LicenseAnalysisSection({ vendors }) {
                     </div>
                   )}
 
+                  {/* Auth Method Toggle for Oracle */}
+                  {selectedVendor === 'Oracle' && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Authentication Method</label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => { setAuthMethod('apikey'); setCredentials({}); }}
+                          className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
+                            authMethod === 'apikey' && !credentials.demo_mode
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-700 border-slate-300 hover:border-emerald-400'
+                          }`}
+                        >
+                          OCI API Key
+                        </button>
+                        <button
+                          onClick={() => { setAuthMethod('apikey'); setCredentials({ demo_mode: true }); }}
+                          className="px-4 py-2 rounded-lg border text-sm font-medium transition bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100"
+                        >
+                          Demo Mode (Sample Data)
+                        </button>
+                      </div>
+                      {!credentials.demo_mode && (
+                        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                          <p className="font-semibold mb-1">Required OCI Policies</p>
+                          <p>The user needs: <span className="font-mono">inspect instances</span>, <span className="font-mono">inspect volumes</span>, <span className="font-mono">inspect users</span>, <span className="font-mono">read usage-reports</span></p>
+                          <p className="mt-1">Generate an API key in <strong>OCI Console</strong> → <strong>Profile</strong> → <strong>API Keys</strong> → <strong>Add API Key</strong></p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {!credentials.demo_mode && (
                     <div className="space-y-3">
                       {credFields.map((field) => (
@@ -1113,8 +1138,7 @@ function LicenseAnalysisSection({ vendors }) {
                       </>
                     )}
                   </button>
-                </>
-              )}
+              </>
             </div>
           )}
 
@@ -1174,6 +1198,9 @@ function LicenseResultPanel({ result }) {
   }
   if (result.report_type === 'cloud_cost' && result.vendor === 'Google Cloud') {
     return <GCPResultPanel result={result} />;
+  }
+  if (result.report_type === 'cloud_cost' && result.vendor === 'Oracle') {
+    return <OracleResultPanel result={result} />;
   }
 
   if (!result.licenses) return null;
@@ -1606,6 +1633,178 @@ function GCPResultPanel({ result }) {
             <div className="bg-amber-50 rounded-lg p-3 text-center">
               <p className="text-xs text-slate-500 mb-1">Old SA Keys (&gt;90d)</p>
               <p className="text-lg font-bold text-amber-700">{iam.old_sa_keys || 0}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {result.retrieved_at && (
+        <p className="text-xs text-slate-400 mt-3 text-right">
+          Data retrieved: {new Date(result.retrieved_at).toLocaleString()}
+        </p>
+      )}
+    </div>
+  );
+}
+
+
+function OracleResultPanel({ result }) {
+  const cost = result.cost_summary || {};
+  const compute = result.compute || {};
+  const storage = result.storage_waste || {};
+  const iam = result.iam_summary || {};
+  const services = cost.top_services || [];
+
+  return (
+    <div className="mt-4 border-t border-slate-200 pt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <h4 className="text-sm font-bold text-slate-900">Oracle Cloud — Infrastructure & Cost Analysis</h4>
+        {result.demo_mode && (
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Demo Data</span>
+        )}
+      </div>
+
+      {/* Top-Level Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div className="bg-blue-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Monthly Spend</p>
+          <p className="text-lg font-bold text-blue-700">{formatCurrency(cost.total_monthly || 0)}</p>
+        </div>
+        <div className="bg-green-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Compute Instances</p>
+          <p className="text-lg font-bold text-green-700">{compute.running || 0} running</p>
+        </div>
+        <div className="bg-red-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Storage Waste</p>
+          <p className="text-lg font-bold text-red-700">{formatCurrency(storage.estimated_waste || 0)}/mo</p>
+        </div>
+        <div className="bg-purple-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">IAM Users</p>
+          <p className="text-lg font-bold text-purple-700">{(iam.total_users || 0).toLocaleString()}</p>
+        </div>
+      </div>
+
+      {/* Cost Breakdown by Service */}
+      {services.length > 0 && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Cost Breakdown by Service</h5>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-left">
+                  <th className="px-3 py-2 font-medium text-slate-600">Service</th>
+                  <th className="px-3 py-2 font-medium text-slate-600 text-right">Monthly Avg</th>
+                  <th className="px-3 py-2 font-medium text-slate-600 text-right">6-Month Total</th>
+                  <th className="px-3 py-2 font-medium text-slate-600">6-Month Trend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {services.map((svc, i) => (
+                  <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="px-3 py-2 font-medium text-slate-900">{svc.service}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(svc.monthly_cost)}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(svc.total_6m)}</td>
+                    <td className="px-3 py-2">
+                      {svc.trend_6m && svc.trend_6m.length > 0 && <MiniTrend values={svc.trend_6m} />}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Compute Instances */}
+      {compute.total_instances > 0 && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">OCI Compute Instances</h5>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Total Instances</p>
+              <p className="text-lg font-bold text-slate-700">{compute.total_instances}</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Running</p>
+              <p className="text-lg font-bold text-green-700">{compute.running}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Stopped</p>
+              <p className="text-lg font-bold text-red-700">{compute.stopped}</p>
+            </div>
+          </div>
+          {compute.shapes && Object.keys(compute.shapes).length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-left">
+                    <th className="px-3 py-2 font-medium text-slate-600">Shape</th>
+                    <th className="px-3 py-2 font-medium text-slate-600 text-right">Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(compute.shapes).map(([shape, count]) => (
+                    <tr key={shape} className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="px-3 py-2 font-medium text-slate-900 font-mono text-xs">{shape}</td>
+                      <td className="px-3 py-2 text-right text-slate-700">{count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Block Volume Analysis */}
+      {(storage.unattached_volumes > 0 || storage.total_volumes > 0) && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Block Volume Analysis</h5>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Total Volumes</p>
+              <p className="text-lg font-bold text-slate-700">{storage.total_volumes}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Unattached</p>
+              <p className="text-lg font-bold text-red-700">{storage.unattached_volumes}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Unattached Size</p>
+              <p className="text-lg font-bold text-red-700">{(storage.unattached_size_gb || 0).toLocaleString()} GB</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Est. Monthly Waste</p>
+              <p className="text-lg font-bold text-red-700">{formatCurrency(storage.estimated_waste || 0)}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* IAM User Analysis */}
+      {iam.total_users > 0 && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">IAM User Analysis</h5>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Total Users</p>
+              <p className="text-lg font-bold text-slate-700">{iam.total_users}</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Active</p>
+              <p className="text-lg font-bold text-green-700">{iam.active_users || 0}</p>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Inactive</p>
+              <p className="text-lg font-bold text-amber-700">{iam.inactive_users || 0}</p>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Old API Keys (&gt;90d)</p>
+              <p className="text-lg font-bold text-amber-700">{iam.old_api_keys || 0}</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">IAM Groups</p>
+              <p className="text-lg font-bold text-slate-700">{iam.total_groups || 0}</p>
             </div>
           </div>
         </div>
