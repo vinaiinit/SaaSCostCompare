@@ -668,20 +668,278 @@ class OracleConnector(VendorConnector):
 
 
 class GoogleCloudConnector(VendorConnector):
-    """Placeholder connector for Google Cloud/Workspace license data."""
+    """Connect to Google Cloud APIs for compute, disk, and IAM analysis."""
 
     vendor_name = "Google Cloud"
 
+    def __init__(self):
+        self.access_token = None
+        self.project_id = None
+        self.demo_mode = False
+
     def authenticate(self, credentials: dict) -> bool:
-        return bool(credentials.get("access_token") or credentials.get("service_account_key"))
+        import requests
+        import jwt
+        import time
+
+        if credentials.get("demo_mode"):
+            self.demo_mode = True
+            return True
+
+        sa_key_raw = credentials.get("service_account_key", "").strip()
+        if not sa_key_raw:
+            return False
+
+        try:
+            sa_key = json.loads(sa_key_raw)
+        except json.JSONDecodeError:
+            print("Google Cloud: invalid service account JSON")
+            return False
+
+        self.project_id = sa_key.get("project_id")
+        client_email = sa_key.get("client_email")
+        private_key = sa_key.get("private_key", "")
+        token_uri = sa_key.get("token_uri", "https://oauth2.googleapis.com/token")
+
+        if not all([self.project_id, client_email, private_key]):
+            return False
+
+        now = int(time.time())
+        payload = {
+            "iss": client_email,
+            "sub": client_email,
+            "aud": token_uri,
+            "iat": now,
+            "exp": now + 3600,
+            "scope": "https://www.googleapis.com/auth/cloud-platform",
+        }
+
+        try:
+            assertion = jwt.encode(payload, private_key, algorithm="RS256")
+            resp = requests.post(
+                token_uri,
+                data={
+                    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                    "assertion": assertion,
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                self.access_token = resp.json()["access_token"]
+                return True
+            print(f"Google Cloud auth failed: {resp.status_code} {resp.text[:300]}")
+            return False
+        except Exception as e:
+            print(f"Google Cloud auth error: {e}")
+            return False
+
+    def _get(self, url: str) -> dict:
+        import requests
+        try:
+            resp = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            print(f"GCP API failed: {resp.status_code} {url}")
+        except Exception as e:
+            print(f"GCP API error: {e}")
+        return {}
 
     def get_license_summary(self) -> dict:
+        if self.demo_mode:
+            return self._get_demo_data()
+
+        compute = self._get_compute_instances()
+        disks = self._get_disk_waste()
+        iam = self._get_iam_summary()
+        billing = self._get_billing_info()
+
+        licenses = []
+        for svc in billing:
+            licenses.append({
+                "product_name": svc["service"],
+                "total_licenses": 0,
+                "assigned_licenses": 0,
+                "active_users": 0,
+                "unused_licenses": 0,
+                "utilization_pct": 0,
+                "monthly_cost": svc["monthly_cost"],
+            })
+
         return {
             "vendor": "Google Cloud",
-            "licenses": [],
-            "login_activity": {"daily_avg_logins": 0, "unique_users_30d": 0, "total_users": 0},
+            "report_type": "cloud_cost",
+            "cost_summary": {
+                "total_monthly": sum(s["monthly_cost"] for s in billing),
+                "top_services": billing[:10],
+            },
+            "compute": compute,
+            "disk_waste": disks,
+            "iam_summary": iam,
+            "licenses": licenses[:10],
+            "login_activity": {
+                "daily_avg_logins": 0,
+                "unique_users_30d": iam.get("active_service_accounts", 0),
+                "total_users": iam.get("total_service_accounts", 0),
+            },
             "retrieved_at": datetime.utcnow().isoformat(),
-            "note": "Google Workspace license analysis via Admin SDK. Full integration coming soon.",
+        }
+
+    def _get_compute_instances(self) -> dict:
+        base = f"https://compute.googleapis.com/compute/v1/projects/{self.project_id}"
+        data = self._get(f"{base}/aggregated/instances")
+
+        running = 0
+        stopped = 0
+        total = 0
+        machine_types = {}
+
+        for zone_data in data.get("items", {}).values():
+            for inst in zone_data.get("instances", []):
+                total += 1
+                status = inst.get("status", "")
+                if status == "RUNNING":
+                    running += 1
+                elif status in ("TERMINATED", "STOPPED", "SUSPENDED"):
+                    stopped += 1
+
+                mt = inst.get("machineType", "").rsplit("/", 1)[-1]
+                machine_types[mt] = machine_types.get(mt, 0) + 1
+
+        return {
+            "total_instances": total,
+            "running": running,
+            "stopped": stopped,
+            "machine_types": dict(sorted(machine_types.items(), key=lambda x: -x[1])[:10]),
+        }
+
+    def _get_disk_waste(self) -> dict:
+        base = f"https://compute.googleapis.com/compute/v1/projects/{self.project_id}"
+        data = self._get(f"{base}/aggregated/disks")
+
+        unattached = 0
+        unattached_size_gb = 0
+        total_disks = 0
+
+        for zone_data in data.get("items", {}).values():
+            for disk in zone_data.get("disks", []):
+                total_disks += 1
+                if not disk.get("users"):
+                    unattached += 1
+                    unattached_size_gb += int(disk.get("sizeGb", 0))
+
+        return {
+            "total_disks": total_disks,
+            "unattached_disks": unattached,
+            "unattached_size_gb": unattached_size_gb,
+            "estimated_waste": round(unattached_size_gb * 0.04, 2),  # ~$0.04/GB/month pd-standard
+        }
+
+    def _get_iam_summary(self) -> dict:
+        url = f"https://iam.googleapis.com/v1/projects/{self.project_id}/serviceAccounts"
+        data = self._get(url)
+        accounts = data.get("accounts", [])
+
+        total_sa = len(accounts)
+        disabled = sum(1 for a in accounts if a.get("disabled"))
+        old_keys = 0
+        ninety_days_ago = datetime.utcnow() - timedelta(days=90)
+
+        for sa in accounts:
+            if sa.get("disabled"):
+                continue
+            email = sa.get("email", "")
+            keys_url = f"https://iam.googleapis.com/v1/projects/{self.project_id}/serviceAccounts/{email}/keys"
+            keys_data = self._get(keys_url)
+            for key in keys_data.get("keys", []):
+                if key.get("keyType") != "USER_MANAGED":
+                    continue
+                created = key.get("validAfterTime", "")
+                if created:
+                    try:
+                        created_dt = datetime.fromisoformat(created.replace("Z", "+00:00")).replace(tzinfo=None)
+                        if created_dt < ninety_days_ago:
+                            old_keys += 1
+                    except Exception:
+                        pass
+
+        return {
+            "total_service_accounts": total_sa,
+            "active_service_accounts": total_sa - disabled,
+            "disabled_service_accounts": disabled,
+            "old_sa_keys": old_keys,
+        }
+
+    def _get_billing_info(self) -> list:
+        # The Cloud Billing API requires billing account access and BigQuery export
+        # for detailed cost breakdown. We return basic project-level info here.
+        url = f"https://cloudbilling.googleapis.com/v1/projects/{self.project_id}/billingInfo"
+        data = self._get(url)
+        if data.get("billingAccountName"):
+            return [{"service": "Project billing active", "monthly_cost": 0, "total_6m": 0, "trend_6m": []}]
+        return []
+
+    def _get_demo_data(self) -> dict:
+        return {
+            "vendor": "Google Cloud",
+            "demo_mode": True,
+            "report_type": "cloud_cost",
+            "cost_summary": {
+                "total_monthly": 42350,
+                "top_services": [
+                    {"service": "Compute Engine", "monthly_cost": 18200, "total_6m": 109200, "trend_6m": [16500, 17000, 17500, 18000, 18100, 18200]},
+                    {"service": "Cloud SQL", "monthly_cost": 8500, "total_6m": 51000, "trend_6m": [7800, 8000, 8200, 8300, 8400, 8500]},
+                    {"service": "BigQuery", "monthly_cost": 4800, "total_6m": 28800, "trend_6m": [3900, 4100, 4300, 4500, 4700, 4800]},
+                    {"service": "Cloud Storage", "monthly_cost": 3200, "total_6m": 19200, "trend_6m": [2800, 2900, 3000, 3100, 3150, 3200]},
+                    {"service": "GKE / Kubernetes Engine", "monthly_cost": 2800, "total_6m": 16800, "trend_6m": [2200, 2400, 2500, 2600, 2700, 2800]},
+                    {"service": "Cloud Networking", "monthly_cost": 1900, "total_6m": 11400, "trend_6m": [1700, 1750, 1800, 1850, 1880, 1900]},
+                    {"service": "Cloud Pub/Sub", "monthly_cost": 1200, "total_6m": 7200, "trend_6m": [1000, 1050, 1100, 1150, 1180, 1200]},
+                    {"service": "Cloud Functions", "monthly_cost": 950, "total_6m": 5700, "trend_6m": [750, 800, 850, 900, 920, 950]},
+                    {"service": "Cloud Memorystore", "monthly_cost": 500, "total_6m": 3000, "trend_6m": [500, 500, 500, 500, 500, 500]},
+                    {"service": "Secret Manager", "monthly_cost": 300, "total_6m": 1800, "trend_6m": [250, 260, 270, 280, 290, 300]},
+                ],
+            },
+            "compute": {
+                "total_instances": 78,
+                "running": 52,
+                "stopped": 26,
+                "machine_types": {
+                    "e2-standard-4": 22,
+                    "e2-standard-2": 18,
+                    "n2-standard-8": 12,
+                    "e2-medium": 10,
+                    "n2-highmem-4": 8,
+                    "c2-standard-16": 4,
+                    "a2-highgpu-1g": 2,
+                    "e2-micro": 2,
+                },
+            },
+            "disk_waste": {
+                "total_disks": 134,
+                "unattached_disks": 31,
+                "unattached_size_gb": 4800,
+                "estimated_waste": 192.0,
+            },
+            "iam_summary": {
+                "total_service_accounts": 45,
+                "active_service_accounts": 38,
+                "disabled_service_accounts": 7,
+                "old_sa_keys": 12,
+            },
+            "licenses": [
+                {"product_name": "Compute Engine", "total_licenses": 0, "assigned_licenses": 0, "active_users": 0, "unused_licenses": 0, "utilization_pct": 0, "monthly_cost": 18200},
+                {"product_name": "Cloud SQL", "total_licenses": 0, "assigned_licenses": 0, "active_users": 0, "unused_licenses": 0, "utilization_pct": 0, "monthly_cost": 8500},
+                {"product_name": "BigQuery", "total_licenses": 0, "assigned_licenses": 0, "active_users": 0, "unused_licenses": 0, "utilization_pct": 0, "monthly_cost": 4800},
+            ],
+            "login_activity": {
+                "daily_avg_logins": 0,
+                "unique_users_30d": 38,
+                "total_users": 45,
+            },
+            "retrieved_at": datetime.utcnow().isoformat(),
         }
 
 

@@ -735,7 +735,7 @@ const VENDOR_CREDENTIAL_FIELDS = {
     { key: 'access_token', label: 'Access Token', placeholder: 'Your Oracle API token', type: 'password' },
   ],
   'Google Cloud': [
-    { key: 'service_account_key', label: 'Service Account Key (JSON)', placeholder: 'Paste your service account JSON key', type: 'text' },
+    { key: 'service_account_key', label: 'Service Account Key (JSON)', placeholder: '{"type": "service_account", "project_id": "...", ...}', type: 'textarea' },
   ],
   'AWS': [
     { key: 'access_key_id', label: 'Access Key ID', placeholder: 'AKIA...', type: 'text' },
@@ -869,7 +869,7 @@ function LicenseAnalysisSection({ vendors }) {
   const credKey = selectedVendor === 'Salesforce' ? `Salesforce_${authMethod}`
     : selectedVendor === 'SAP' ? `SAP_${authMethod}` : selectedVendor;
   const credFields = VENDOR_CREDENTIAL_FIELDS[credKey] || [];
-  const isPlaceholder = ['Oracle', 'Google Cloud'].includes(selectedVendor);
+  const isPlaceholder = ['Oracle'].includes(selectedVendor);
 
   return (
     <div className="card">
@@ -900,7 +900,7 @@ function LicenseAnalysisSection({ vendors }) {
               {vendors.map((v) => (
                 <button
                   key={v}
-                  onClick={() => { setSelectedVendor(v); setAuthMethod(v === 'SAP' ? 'oauth' : v === 'AWS' ? 'keys' : 'jwt'); setCredentials({}); setResult(null); setError(''); }}
+                  onClick={() => { setSelectedVendor(v); setAuthMethod(v === 'SAP' ? 'oauth' : v === 'AWS' ? 'keys' : v === 'Google Cloud' ? 'sa' : 'jwt'); setCredentials({}); setResult(null); setError(''); }}
                   className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
                     selectedVendor === v
                       ? 'bg-primary-600 text-white border-primary-600'
@@ -1035,6 +1035,38 @@ function LicenseAnalysisSection({ vendors }) {
                     </div>
                   )}
 
+                  {/* Auth Method Toggle for Google Cloud */}
+                  {selectedVendor === 'Google Cloud' && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Authentication Method</label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => { setAuthMethod('sa'); setCredentials({}); }}
+                          className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
+                            authMethod === 'sa' && !credentials.demo_mode
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-700 border-slate-300 hover:border-emerald-400'
+                          }`}
+                        >
+                          Service Account Key
+                        </button>
+                        <button
+                          onClick={() => { setAuthMethod('sa'); setCredentials({ demo_mode: true }); }}
+                          className="px-4 py-2 rounded-lg border text-sm font-medium transition bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100"
+                        >
+                          Demo Mode (Sample Data)
+                        </button>
+                      </div>
+                      {!credentials.demo_mode && (
+                        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                          <p className="font-semibold mb-1">Required Roles</p>
+                          <p>The service account needs: <span className="font-mono">roles/compute.viewer</span>, <span className="font-mono">roles/iam.serviceAccountViewer</span>, <span className="font-mono">roles/billing.viewer</span></p>
+                          <p className="mt-1">Create a key in <strong>IAM &amp; Admin</strong> → <strong>Service Accounts</strong> → your account → <strong>Keys</strong> → <strong>Add Key</strong> → <strong>JSON</strong></p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {!credentials.demo_mode && (
                     <div className="space-y-3">
                       {credFields.map((field) => (
@@ -1137,8 +1169,11 @@ function LicenseAnalysisSection({ vendors }) {
 function LicenseResultPanel({ result }) {
   if (!result) return null;
 
-  if (result.report_type === 'cloud_cost') {
+  if (result.report_type === 'cloud_cost' && result.vendor === 'AWS') {
     return <AWSResultPanel result={result} />;
+  }
+  if (result.report_type === 'cloud_cost' && result.vendor === 'Google Cloud') {
+    return <GCPResultPanel result={result} />;
   }
 
   if (!result.licenses) return null;
@@ -1261,8 +1296,6 @@ function AWSResultPanel({ result }) {
   const iam = result.iam_summary || {};
   const services = cost.top_services || [];
 
-  const totalMonthly = cost.total_monthly || 0;
-
   return (
     <div className="mt-4 border-t border-slate-200 pt-4">
       <div className="flex items-center gap-2 mb-3">
@@ -1276,7 +1309,7 @@ function AWSResultPanel({ result }) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <div className="bg-blue-50 rounded-lg p-3 text-center">
           <p className="text-xs text-slate-500 mb-1">Monthly Spend</p>
-          <p className="text-lg font-bold text-blue-700">{formatCurrency(totalMonthly)}</p>
+          <p className="text-lg font-bold text-blue-700">{formatCurrency(cost.total_monthly || 0)}</p>
         </div>
         <div className="bg-green-50 rounded-lg p-3 text-center">
           <p className="text-xs text-slate-500 mb-1">RI Utilisation</p>
@@ -1315,9 +1348,7 @@ function AWSResultPanel({ result }) {
                     <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(svc.monthly_cost)}</td>
                     <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(svc.total_6m)}</td>
                     <td className="px-3 py-2">
-                      {svc.trend_6m && svc.trend_6m.length > 0 && (
-                        <MiniTrend values={svc.trend_6m} />
-                      )}
+                      {svc.trend_6m && svc.trend_6m.length > 0 && <MiniTrend values={svc.trend_6m} />}
                     </td>
                   </tr>
                 ))}
@@ -1407,6 +1438,174 @@ function AWSResultPanel({ result }) {
             <div className="bg-amber-50 rounded-lg p-3 text-center">
               <p className="text-xs text-slate-500 mb-1">Old Access Keys</p>
               <p className="text-lg font-bold text-amber-700">{iam.old_access_keys || 0}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {result.retrieved_at && (
+        <p className="text-xs text-slate-400 mt-3 text-right">
+          Data retrieved: {new Date(result.retrieved_at).toLocaleString()}
+        </p>
+      )}
+    </div>
+  );
+}
+
+
+function GCPResultPanel({ result }) {
+  const cost = result.cost_summary || {};
+  const compute = result.compute || {};
+  const diskWaste = result.disk_waste || {};
+  const iam = result.iam_summary || {};
+  const services = cost.top_services || [];
+
+  return (
+    <div className="mt-4 border-t border-slate-200 pt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <h4 className="text-sm font-bold text-slate-900">Google Cloud — Infrastructure & Cost Analysis</h4>
+        {result.demo_mode && (
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Demo Data</span>
+        )}
+      </div>
+
+      {/* Top-Level Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div className="bg-blue-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Monthly Spend</p>
+          <p className="text-lg font-bold text-blue-700">{formatCurrency(cost.total_monthly || 0)}</p>
+        </div>
+        <div className="bg-green-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Compute Instances</p>
+          <p className="text-lg font-bold text-green-700">{compute.running || 0} running</p>
+        </div>
+        <div className="bg-red-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Disk Waste</p>
+          <p className="text-lg font-bold text-red-700">{formatCurrency(diskWaste.estimated_waste || 0)}/mo</p>
+        </div>
+        <div className="bg-purple-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Service Accounts</p>
+          <p className="text-lg font-bold text-purple-700">{(iam.total_service_accounts || 0).toLocaleString()}</p>
+        </div>
+      </div>
+
+      {/* Cost Breakdown by Service */}
+      {services.length > 0 && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Cost Breakdown by Service</h5>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-left">
+                  <th className="px-3 py-2 font-medium text-slate-600">Service</th>
+                  <th className="px-3 py-2 font-medium text-slate-600 text-right">Monthly Avg</th>
+                  <th className="px-3 py-2 font-medium text-slate-600 text-right">6-Month Total</th>
+                  <th className="px-3 py-2 font-medium text-slate-600">6-Month Trend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {services.map((svc, i) => (
+                  <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="px-3 py-2 font-medium text-slate-900">{svc.service}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(svc.monthly_cost)}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(svc.total_6m)}</td>
+                    <td className="px-3 py-2">
+                      {svc.trend_6m && svc.trend_6m.length > 0 && <MiniTrend values={svc.trend_6m} />}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Compute Engine Instances */}
+      {compute.total_instances > 0 && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Compute Engine Instances</h5>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Total Instances</p>
+              <p className="text-lg font-bold text-slate-700">{compute.total_instances}</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Running</p>
+              <p className="text-lg font-bold text-green-700">{compute.running}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Stopped / Terminated</p>
+              <p className="text-lg font-bold text-red-700">{compute.stopped}</p>
+            </div>
+          </div>
+          {compute.machine_types && Object.keys(compute.machine_types).length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-left">
+                    <th className="px-3 py-2 font-medium text-slate-600">Machine Type</th>
+                    <th className="px-3 py-2 font-medium text-slate-600 text-right">Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(compute.machine_types).map(([mt, count]) => (
+                    <tr key={mt} className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="px-3 py-2 font-medium text-slate-900 font-mono text-xs">{mt}</td>
+                      <td className="px-3 py-2 text-right text-slate-700">{count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Persistent Disk Analysis */}
+      {(diskWaste.unattached_disks > 0 || diskWaste.total_disks > 0) && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Persistent Disk Analysis</h5>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Total Disks</p>
+              <p className="text-lg font-bold text-slate-700">{diskWaste.total_disks}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Unattached Disks</p>
+              <p className="text-lg font-bold text-red-700">{diskWaste.unattached_disks}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Unattached Size</p>
+              <p className="text-lg font-bold text-red-700">{(diskWaste.unattached_size_gb || 0).toLocaleString()} GB</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Est. Monthly Waste</p>
+              <p className="text-lg font-bold text-red-700">{formatCurrency(diskWaste.estimated_waste || 0)}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Service Account Analysis */}
+      {iam.total_service_accounts > 0 && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Service Account Analysis</h5>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Total SAs</p>
+              <p className="text-lg font-bold text-slate-700">{iam.total_service_accounts}</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Active</p>
+              <p className="text-lg font-bold text-green-700">{iam.active_service_accounts || 0}</p>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Disabled</p>
+              <p className="text-lg font-bold text-amber-700">{iam.disabled_service_accounts || 0}</p>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Old SA Keys (&gt;90d)</p>
+              <p className="text-lg font-bold text-amber-700">{iam.old_sa_keys || 0}</p>
             </div>
           </div>
         </div>
