@@ -65,16 +65,70 @@ class SalesforceConnector(VendorConnector):
             self.instance_url = credentials["instance_url"].rstrip("/")
             return self._verify_connection()
 
-        # Connected App OAuth (username-password flow)
-        if credentials.get("client_id") and credentials.get("username"):
+        # JWT bearer flow (most secure — certificate-based, no password)
+        if credentials.get("private_key") and credentials.get("client_id") and credentials.get("username"):
+            return self._jwt_bearer_login(credentials)
+
+        # Username-password OAuth flow (fallback)
+        if credentials.get("client_id") and credentials.get("username") and credentials.get("password"):
             return self._oauth_login(credentials)
 
         return False
 
+    def _jwt_bearer_login(self, credentials: dict) -> bool:
+        import requests
+        import jwt
+        import time
+
+        login_url = credentials.get("login_url", "").strip().rstrip("/")
+        audience = login_url if login_url else "https://login.salesforce.com"
+        token_endpoint = f"{audience}/services/oauth2/token"
+
+        private_key = credentials.get("private_key", "")
+        # Handle escaped newlines from form input
+        if "\\n" in private_key:
+            private_key = private_key.replace("\\n", "\n")
+
+        now = int(time.time())
+        payload = {
+            "iss": credentials.get("client_id", ""),
+            "sub": credentials.get("username", ""),
+            "aud": audience,
+            "exp": now + 180,
+        }
+
+        try:
+            assertion = jwt.encode(payload, private_key, algorithm="RS256")
+
+            resp = requests.post(
+                token_endpoint,
+                data={
+                    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                    "assertion": assertion,
+                },
+                timeout=15,
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                self.access_token = data["access_token"]
+                self.instance_url = data["instance_url"]
+                print(f"Salesforce JWT bearer login successful: {self.instance_url}")
+                return True
+
+            print(f"Salesforce JWT bearer login failed: {resp.status_code}")
+            print(f"Response: {resp.text[:500]}")
+            return False
+
+        except Exception as e:
+            import traceback
+            print(f"Salesforce JWT bearer error: {e}")
+            traceback.print_exc()
+            return False
+
     def _oauth_login(self, credentials: dict) -> bool:
         import requests
 
-        # Try custom login URL first, then standard endpoints
         login_url = credentials.get("login_url", "").strip().rstrip("/")
         urls_to_try = []
         if login_url:

@@ -701,7 +701,13 @@ function BenchmarkPanel({ benchmark }) {
 // ── Current Licence Analysis ────────────────────────────────────────────────
 
 const VENDOR_CREDENTIAL_FIELDS = {
-  'Salesforce': [
+  'Salesforce_jwt': [
+    { key: 'login_url', label: 'Salesforce Instance URL', placeholder: 'https://yourorg.my.salesforce.com', type: 'text' },
+    { key: 'client_id', label: 'Connected App Consumer Key', placeholder: 'From Setup → App Manager → Your App → View', type: 'text' },
+    { key: 'username', label: 'Salesforce Username', placeholder: 'admin@yourcompany.com', type: 'text' },
+    { key: 'private_key', label: 'Private Key (PEM)', placeholder: 'Paste your private key including BEGIN/END lines', type: 'textarea' },
+  ],
+  'Salesforce_password': [
     { key: 'login_url', label: 'Salesforce Instance URL', placeholder: 'https://yourorg.my.salesforce.com', type: 'text' },
     { key: 'client_id', label: 'Connected App Consumer Key', placeholder: 'From Setup → App Manager → Your App → View', type: 'text' },
     { key: 'client_secret', label: 'Consumer Secret', placeholder: 'Consumer secret from your Connected App', type: 'password' },
@@ -733,6 +739,7 @@ const VENDOR_CREDENTIAL_FIELDS = {
 function LicenseAnalysisSection({ vendors }) {
   const [expanded, setExpanded] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState('');
+  const [authMethod, setAuthMethod] = useState('jwt');
   const [credentials, setCredentials] = useState({});
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState(null);
@@ -764,7 +771,8 @@ function LicenseAnalysisSection({ vendors }) {
     }
   };
 
-  const credFields = VENDOR_CREDENTIAL_FIELDS[selectedVendor] || [];
+  const credKey = selectedVendor === 'Salesforce' ? `Salesforce_${authMethod}` : selectedVendor;
+  const credFields = VENDOR_CREDENTIAL_FIELDS[credKey] || [];
   const isPlaceholder = ['SAP', 'Oracle', 'Google Cloud', 'AWS'].includes(selectedVendor);
 
   return (
@@ -796,7 +804,7 @@ function LicenseAnalysisSection({ vendors }) {
               {vendors.map((v) => (
                 <button
                   key={v}
-                  onClick={() => { setSelectedVendor(v); setCredentials({}); setResult(null); setError(''); }}
+                  onClick={() => { setSelectedVendor(v); setAuthMethod('jwt'); setCredentials({}); setResult(null); setError(''); }}
                   className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
                     selectedVendor === v
                       ? 'bg-primary-600 text-white border-primary-600'
@@ -829,17 +837,56 @@ function LicenseAnalysisSection({ vendors }) {
                     </p>
                   </div>
 
+                  {/* Auth Method Toggle for Salesforce */}
+                  {selectedVendor === 'Salesforce' && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Authentication Method</label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => { setAuthMethod('jwt'); setCredentials({}); }}
+                          className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
+                            authMethod === 'jwt'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-700 border-slate-300 hover:border-emerald-400'
+                          }`}
+                        >
+                          JWT Bearer (Recommended)
+                        </button>
+                        <button
+                          onClick={() => { setAuthMethod('password'); setCredentials({}); }}
+                          className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
+                            authMethod === 'password'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-700 border-slate-300 hover:border-emerald-400'
+                          }`}
+                        >
+                          Username / Password
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-3">
                     {credFields.map((field) => (
                       <div key={field.key}>
                         <label className="block text-sm font-medium text-slate-700 mb-1">{field.label}</label>
-                        <input
-                          type={field.type}
-                          placeholder={field.placeholder}
-                          value={credentials[field.key] || ''}
-                          onChange={(e) => setCredentials({ ...credentials, [field.key]: e.target.value })}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                        />
+                        {field.type === 'textarea' ? (
+                          <textarea
+                            placeholder={field.placeholder}
+                            value={credentials[field.key] || ''}
+                            onChange={(e) => setCredentials({ ...credentials, [field.key]: e.target.value })}
+                            rows={6}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                          />
+                        ) : (
+                          <input
+                            type={field.type}
+                            placeholder={field.placeholder}
+                            value={credentials[field.key] || ''}
+                            onChange={(e) => setCredentials({ ...credentials, [field.key]: e.target.value })}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                          />
+                        )}
                       </div>
                     ))}
                   </div>

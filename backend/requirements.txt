@@ -21,3 +21,5 @@ python-docx
 PyPDF2
 PyMuPDF
 requests
+PyJWT
+cryptography
