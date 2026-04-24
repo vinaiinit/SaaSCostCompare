@@ -118,6 +118,8 @@ export const licenseAPI = {
     api.get('/license-analysis'),
   get: (analysisId) =>
     api.get(`/license-analysis/${analysisId}`),
+  generateCertificate: () =>
+    api.post('/generate-certificate'),
 };
 
 export default api;

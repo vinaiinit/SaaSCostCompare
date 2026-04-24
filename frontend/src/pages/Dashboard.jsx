@@ -736,6 +736,93 @@ const VENDOR_CREDENTIAL_FIELDS = {
   ],
 };
 
+function JwtSetupGuide({ onKeyGenerated }) {
+  const [generating, setGenerating] = useState(false);
+  const [generated, setGenerated] = useState(false);
+  const [certPem, setCertPem] = useState('');
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const res = await licenseAPI.generateCertificate();
+      const { private_key, certificate } = res.data;
+      onKeyGenerated(private_key);
+      setCertPem(certificate);
+      setGenerated(true);
+    } catch (err) {
+      alert('Failed to generate certificate: ' + (err.response?.data?.detail || 'Unknown error'));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const downloadCert = () => {
+    const blob = new Blob([certPem], { type: 'application/x-pem-file' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'SaaSCostCompare_certificate.crt';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="mt-3 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-sm">
+      <p className="font-semibold text-emerald-900 mb-2">JWT Setup (one-time per Connected App)</p>
+
+      {!generated ? (
+        <>
+          <ol className="list-decimal ml-4 space-y-1 text-emerald-800 mb-3">
+            <li>Click <strong>Generate Certificate</strong> below</li>
+            <li>Download the certificate file</li>
+            <li>In Salesforce: <strong>Setup</strong> → <strong>App Manager</strong> → your Connected App → <strong>Edit</strong></li>
+            <li>Check <strong>"Use Digital Signatures"</strong> and upload the certificate</li>
+            <li>Fill in the remaining fields below and run the analysis</li>
+          </ol>
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
+          >
+            {generating ? (
+              <>
+                <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                Generating...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                Generate Certificate
+              </>
+            )}
+          </button>
+        </>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-emerald-800">
+            <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            <span className="font-medium">Certificate generated! Private key auto-filled below.</span>
+          </div>
+          <button
+            onClick={downloadCert}
+            className="bg-white text-emerald-700 border border-emerald-300 px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-50 flex items-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download Certificate (.crt) — upload this to Salesforce Connected App
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function LicenseAnalysisSection({ vendors }) {
   const [expanded, setExpanded] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState('');
@@ -863,6 +950,13 @@ function LicenseAnalysisSection({ vendors }) {
                           Username / Password
                         </button>
                       </div>
+
+                      {/* JWT Setup Guide */}
+                      {authMethod === 'jwt' && (
+                        <JwtSetupGuide
+                          onKeyGenerated={(privateKey) => setCredentials({ ...credentials, private_key: privateKey })}
+                        />
+                      )}
                     </div>
                   )}
 
