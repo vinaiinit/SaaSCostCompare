@@ -740,6 +740,7 @@ const VENDOR_CREDENTIAL_FIELDS = {
   'AWS': [
     { key: 'access_key_id', label: 'Access Key ID', placeholder: 'AKIA...', type: 'text' },
     { key: 'secret_access_key', label: 'Secret Access Key', placeholder: 'Your secret key', type: 'password' },
+    { key: 'region', label: 'Region', placeholder: 'us-east-1', type: 'text' },
   ],
 };
 
@@ -868,7 +869,7 @@ function LicenseAnalysisSection({ vendors }) {
   const credKey = selectedVendor === 'Salesforce' ? `Salesforce_${authMethod}`
     : selectedVendor === 'SAP' ? `SAP_${authMethod}` : selectedVendor;
   const credFields = VENDOR_CREDENTIAL_FIELDS[credKey] || [];
-  const isPlaceholder = ['Oracle', 'Google Cloud', 'AWS'].includes(selectedVendor);
+  const isPlaceholder = ['Oracle', 'Google Cloud'].includes(selectedVendor);
 
   return (
     <div className="card">
@@ -899,7 +900,7 @@ function LicenseAnalysisSection({ vendors }) {
               {vendors.map((v) => (
                 <button
                   key={v}
-                  onClick={() => { setSelectedVendor(v); setAuthMethod(v === 'SAP' ? 'oauth' : 'jwt'); setCredentials({}); setResult(null); setError(''); }}
+                  onClick={() => { setSelectedVendor(v); setAuthMethod(v === 'SAP' ? 'oauth' : v === 'AWS' ? 'keys' : 'jwt'); setCredentials({}); setResult(null); setError(''); }}
                   className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
                     selectedVendor === v
                       ? 'bg-primary-600 text-white border-primary-600'
@@ -1003,30 +1004,63 @@ function LicenseAnalysisSection({ vendors }) {
                     </div>
                   )}
 
-                  <div className="space-y-3">
-                    {credFields.map((field) => (
-                      <div key={field.key}>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">{field.label}</label>
-                        {field.type === 'textarea' ? (
-                          <textarea
-                            placeholder={field.placeholder}
-                            value={credentials[field.key] || ''}
-                            onChange={(e) => setCredentials({ ...credentials, [field.key]: e.target.value })}
-                            rows={6}
-                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                          />
-                        ) : (
-                          <input
-                            type={field.type}
-                            placeholder={field.placeholder}
-                            value={credentials[field.key] || ''}
-                            onChange={(e) => setCredentials({ ...credentials, [field.key]: e.target.value })}
-                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                          />
-                        )}
+                  {/* Auth Method Toggle for AWS */}
+                  {selectedVendor === 'AWS' && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Authentication Method</label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => { setAuthMethod('keys'); setCredentials({}); }}
+                          className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
+                            authMethod === 'keys' && !credentials.demo_mode
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-700 border-slate-300 hover:border-emerald-400'
+                          }`}
+                        >
+                          IAM Access Keys
+                        </button>
+                        <button
+                          onClick={() => { setAuthMethod('keys'); setCredentials({ demo_mode: true }); }}
+                          className="px-4 py-2 rounded-lg border text-sm font-medium transition bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100"
+                        >
+                          Demo Mode (Sample Data)
+                        </button>
                       </div>
-                    ))}
-                  </div>
+                      {!credentials.demo_mode && (
+                        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                          <p className="font-semibold mb-1">Required IAM Permissions</p>
+                          <p>The access key needs: <span className="font-mono">ce:GetCostAndUsage</span>, <span className="font-mono">ce:GetReservationUtilization</span>, <span className="font-mono">ec2:DescribeInstances</span>, <span className="font-mono">ec2:DescribeVolumes</span>, <span className="font-mono">ec2:DescribeAddresses</span>, <span className="font-mono">iam:ListUsers</span>, <span className="font-mono">iam:ListAccessKeys</span>, <span className="font-mono">sts:GetCallerIdentity</span></p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {!credentials.demo_mode && (
+                    <div className="space-y-3">
+                      {credFields.map((field) => (
+                        <div key={field.key}>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">{field.label}</label>
+                          {field.type === 'textarea' ? (
+                            <textarea
+                              placeholder={field.placeholder}
+                              value={credentials[field.key] || ''}
+                              onChange={(e) => setCredentials({ ...credentials, [field.key]: e.target.value })}
+                              rows={6}
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                            />
+                          ) : (
+                            <input
+                              type={field.type}
+                              placeholder={field.placeholder}
+                              value={credentials[field.key] || ''}
+                              onChange={(e) => setCredentials({ ...credentials, [field.key]: e.target.value })}
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   <button
                     onClick={handleAnalyze}
@@ -1101,7 +1135,13 @@ function LicenseAnalysisSection({ vendors }) {
 
 
 function LicenseResultPanel({ result }) {
-  if (!result || !result.licenses) return null;
+  if (!result) return null;
+
+  if (result.report_type === 'cloud_cost') {
+    return <AWSResultPanel result={result} />;
+  }
+
+  if (!result.licenses) return null;
 
   const licenses = result.licenses || [];
   const activity = result.login_activity || {};
@@ -1210,5 +1250,200 @@ function LicenseResultPanel({ result }) {
         </p>
       )}
     </div>
+  );
+}
+
+
+function AWSResultPanel({ result }) {
+  const cost = result.cost_summary || {};
+  const ri = result.reservations || {};
+  const idle = result.idle_resources || {};
+  const iam = result.iam_summary || {};
+  const services = cost.top_services || [];
+
+  const totalMonthly = cost.total_monthly || 0;
+
+  return (
+    <div className="mt-4 border-t border-slate-200 pt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <h4 className="text-sm font-bold text-slate-900">AWS — Cloud Cost & Usage Analysis</h4>
+        {result.demo_mode && (
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Demo Data</span>
+        )}
+      </div>
+
+      {/* Top-Level Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div className="bg-blue-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Monthly Spend</p>
+          <p className="text-lg font-bold text-blue-700">{formatCurrency(totalMonthly)}</p>
+        </div>
+        <div className="bg-green-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">RI Utilisation</p>
+          <p className={`text-lg font-bold ${ri.utilization_pct >= 80 ? 'text-green-700' : ri.utilization_pct >= 50 ? 'text-amber-700' : 'text-red-700'}`}>
+            {ri.has_reservations ? `${ri.utilization_pct}%` : 'No RIs'}
+          </p>
+        </div>
+        <div className="bg-red-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Idle Resource Waste</p>
+          <p className="text-lg font-bold text-red-700">{formatCurrency(idle.estimated_waste || 0)}/mo</p>
+        </div>
+        <div className="bg-purple-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">IAM Users</p>
+          <p className="text-lg font-bold text-purple-700">{(iam.total_users || 0).toLocaleString()}</p>
+        </div>
+      </div>
+
+      {/* Cost Breakdown by Service */}
+      {services.length > 0 && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Cost Breakdown by Service</h5>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-left">
+                  <th className="px-3 py-2 font-medium text-slate-600">Service</th>
+                  <th className="px-3 py-2 font-medium text-slate-600 text-right">Monthly Avg</th>
+                  <th className="px-3 py-2 font-medium text-slate-600 text-right">6-Month Total</th>
+                  <th className="px-3 py-2 font-medium text-slate-600">6-Month Trend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {services.map((svc, i) => (
+                  <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="px-3 py-2 font-medium text-slate-900">{svc.service}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(svc.monthly_cost)}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(svc.total_6m)}</td>
+                    <td className="px-3 py-2">
+                      {svc.trend_6m && svc.trend_6m.length > 0 && (
+                        <MiniTrend values={svc.trend_6m} />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Reserved Instances */}
+      {ri.has_reservations && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Reserved Instance Utilisation</h5>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Utilisation</p>
+              <p className={`text-lg font-bold ${ri.utilization_pct >= 80 ? 'text-green-700' : ri.utilization_pct >= 50 ? 'text-amber-700' : 'text-red-700'}`}>
+                {ri.utilization_pct}%
+              </p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Purchased Hours</p>
+              <p className="text-lg font-bold text-slate-700">{(ri.purchased_hours || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Used Hours</p>
+              <p className="text-lg font-bold text-green-700">{(ri.used_hours || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Unused Hours</p>
+              <p className="text-lg font-bold text-red-700">{(ri.unused_hours || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Net RI Savings</p>
+              <p className="text-lg font-bold text-green-700">{formatCurrency(ri.net_savings || 0)}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Idle Resources */}
+      {(idle.ec2_stopped > 0 || idle.ebs_unattached > 0 || idle.eip_unassociated > 0) && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Idle Resources</h5>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Stopped EC2</p>
+              <p className="text-lg font-bold text-red-700">{idle.ec2_stopped}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Unattached EBS</p>
+              <p className="text-lg font-bold text-red-700">{idle.ebs_unattached}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Unused Elastic IPs</p>
+              <p className="text-lg font-bold text-red-700">{idle.eip_unassociated}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Est. Monthly Waste</p>
+              <p className="text-lg font-bold text-red-700">{formatCurrency(idle.estimated_waste || 0)}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* IAM Summary */}
+      {iam.total_users > 0 && (
+        <div className="mb-4">
+          <h5 className="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">IAM User Analysis</h5>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Total Users</p>
+              <p className="text-lg font-bold text-slate-700">{iam.total_users}</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Active (90d)</p>
+              <p className="text-lg font-bold text-green-700">{iam.active_users_90d || 0}</p>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Inactive (90d)</p>
+              <p className="text-lg font-bold text-amber-700">{iam.inactive_users_90d || 0}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Never Logged In</p>
+              <p className="text-lg font-bold text-red-700">{iam.never_logged_in || 0}</p>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-3 text-center">
+              <p className="text-xs text-slate-500 mb-1">Old Access Keys</p>
+              <p className="text-lg font-bold text-amber-700">{iam.old_access_keys || 0}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {result.retrieved_at && (
+        <p className="text-xs text-slate-400 mt-3 text-right">
+          Data retrieved: {new Date(result.retrieved_at).toLocaleString()}
+        </p>
+      )}
+    </div>
+  );
+}
+
+
+function MiniTrend({ values }) {
+  if (!values || values.length === 0) return null;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  const h = 24;
+  const w = 80;
+  const step = w / (values.length - 1 || 1);
+
+  const points = values.map((v, i) => `${i * step},${h - ((v - min) / range) * (h - 4) - 2}`).join(' ');
+  const trending = values[values.length - 1] > values[0];
+
+  return (
+    <svg width={w} height={h} className="inline-block">
+      <polyline
+        points={points}
+        fill="none"
+        stroke={trending ? '#ef4444' : '#22c55e'}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }

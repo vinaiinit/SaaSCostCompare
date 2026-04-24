@@ -686,20 +686,302 @@ class GoogleCloudConnector(VendorConnector):
 
 
 class AWSConnector(VendorConnector):
-    """Placeholder connector for AWS license/usage data."""
+    """Connect to AWS APIs for cost analysis, resource utilization, and IAM user data."""
 
     vendor_name = "AWS"
 
+    def __init__(self):
+        self.session = None
+        self.demo_mode = False
+
     def authenticate(self, credentials: dict) -> bool:
-        return bool(credentials.get("access_key_id") and credentials.get("secret_access_key"))
+        import boto3
+
+        if credentials.get("demo_mode"):
+            self.demo_mode = True
+            return True
+
+        access_key = credentials.get("access_key_id", "").strip()
+        secret_key = credentials.get("secret_access_key", "").strip()
+        region = credentials.get("region", "us-east-1").strip()
+
+        if not access_key or not secret_key:
+            return False
+
+        try:
+            self.session = boto3.Session(
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                region_name=region,
+            )
+            # Verify credentials with STS
+            sts = self.session.client("sts")
+            sts.get_caller_identity()
+            return True
+        except Exception as e:
+            print(f"AWS auth failed: {e}")
+            return False
 
     def get_license_summary(self) -> dict:
+        if self.demo_mode:
+            return self._get_demo_data()
+
+        cost_data = self._get_cost_breakdown()
+        ri_data = self._get_reservation_utilization()
+        idle_resources = self._get_idle_resources()
+        iam_data = self._get_iam_summary()
+
+        # Build license-style entries from AWS data
+        licenses = []
+
+        # Cost by service as "licenses"
+        for svc in cost_data:
+            licenses.append({
+                "product_name": svc["service"],
+                "total_licenses": 0,
+                "assigned_licenses": 0,
+                "active_users": 0,
+                "unused_licenses": 0,
+                "utilization_pct": 0,
+                "monthly_cost": svc["monthly_cost"],
+                "trend_6m": svc.get("trend_6m", []),
+            })
+
         return {
             "vendor": "AWS",
-            "licenses": [],
-            "login_activity": {"daily_avg_logins": 0, "unique_users_30d": 0, "total_users": 0},
+            "report_type": "cloud_cost",
+            "cost_summary": {
+                "total_monthly": sum(s["monthly_cost"] for s in cost_data),
+                "top_services": cost_data[:10],
+            },
+            "reservations": ri_data,
+            "idle_resources": idle_resources,
+            "iam_summary": iam_data,
+            "licenses": licenses[:10],
+            "login_activity": {
+                "daily_avg_logins": 0,
+                "unique_users_30d": iam_data.get("active_users_90d", 0),
+                "total_users": iam_data.get("total_users", 0),
+            },
             "retrieved_at": datetime.utcnow().isoformat(),
-            "note": "AWS usage analysis via Cost Explorer and IAM APIs. Full integration coming soon.",
+        }
+
+    def _get_cost_breakdown(self) -> list:
+        try:
+            ce = self.session.client("ce")
+            end = datetime.utcnow().replace(day=1)
+            start = (end - timedelta(days=180)).replace(day=1)
+
+            resp = ce.get_cost_and_usage(
+                TimePeriod={
+                    "Start": start.strftime("%Y-%m-%d"),
+                    "End": end.strftime("%Y-%m-%d"),
+                },
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+                GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
+            )
+
+            service_costs = {}
+            for period in resp.get("ResultsByTime", []):
+                for group in period.get("Groups", []):
+                    service = group["Keys"][0]
+                    cost = float(group["Metrics"]["UnblendedCost"]["Amount"])
+                    if service not in service_costs:
+                        service_costs[service] = {"total": 0, "months": []}
+                    service_costs[service]["total"] += cost
+                    service_costs[service]["months"].append(round(cost, 2))
+
+            num_months = max(len(resp.get("ResultsByTime", [])), 1)
+            result = []
+            for service, data in service_costs.items():
+                if data["total"] < 1:
+                    continue
+                result.append({
+                    "service": service,
+                    "monthly_cost": round(data["total"] / num_months, 2),
+                    "total_6m": round(data["total"], 2),
+                    "trend_6m": data["months"],
+                })
+
+            result.sort(key=lambda x: x["monthly_cost"], reverse=True)
+            return result
+
+        except Exception as e:
+            print(f"AWS Cost Explorer error: {e}")
+            return []
+
+    def _get_reservation_utilization(self) -> dict:
+        try:
+            ce = self.session.client("ce")
+            end = datetime.utcnow()
+            start = end - timedelta(days=30)
+
+            resp = ce.get_reservation_utilization(
+                TimePeriod={
+                    "Start": start.strftime("%Y-%m-%d"),
+                    "End": end.strftime("%Y-%m-%d"),
+                },
+            )
+
+            total = resp.get("Total", {})
+            util = total.get("UtilizationPercentage", "0")
+            purchased = float(total.get("PurchasedHours", "0"))
+            used = float(total.get("TotalActualHours", "0"))
+            unused = float(total.get("UnusedHours", "0"))
+            savings = float(total.get("NetRISavings", "0"))
+
+            return {
+                "utilization_pct": round(float(util), 1),
+                "purchased_hours": round(purchased),
+                "used_hours": round(used),
+                "unused_hours": round(unused),
+                "net_savings": round(savings, 2),
+                "has_reservations": purchased > 0,
+            }
+
+        except Exception as e:
+            print(f"AWS RI utilization error: {e}")
+            return {"has_reservations": False, "utilization_pct": 0}
+
+    def _get_idle_resources(self) -> dict:
+        idle = {"ec2_stopped": 0, "ebs_unattached": 0, "eip_unassociated": 0, "estimated_waste": 0}
+
+        try:
+            ec2 = self.session.client("ec2")
+
+            # Stopped EC2 instances
+            stopped = ec2.describe_instances(Filters=[{"Name": "instance-state-name", "Values": ["stopped"]}])
+            for r in stopped.get("Reservations", []):
+                idle["ec2_stopped"] += len(r.get("Instances", []))
+
+            # Unattached EBS volumes
+            volumes = ec2.describe_volumes(Filters=[{"Name": "status", "Values": ["available"]}])
+            unattached = volumes.get("Volumes", [])
+            idle["ebs_unattached"] = len(unattached)
+            for vol in unattached:
+                size_gb = vol.get("Size", 0)
+                idle["estimated_waste"] += size_gb * 0.10  # ~$0.10/GB/month for gp3
+
+            # Unassociated Elastic IPs
+            eips = ec2.describe_addresses()
+            for eip in eips.get("Addresses", []):
+                if not eip.get("InstanceId") and not eip.get("NetworkInterfaceId"):
+                    idle["eip_unassociated"] += 1
+                    idle["estimated_waste"] += 3.65  # ~$3.65/month per unused EIP
+
+            idle["estimated_waste"] = round(idle["estimated_waste"], 2)
+
+        except Exception as e:
+            print(f"AWS idle resources error: {e}")
+
+        return idle
+
+    def _get_iam_summary(self) -> dict:
+        try:
+            iam = self.session.client("iam")
+
+            # Get all users
+            users = []
+            paginator = iam.get_paginator("list_users")
+            for page in paginator.paginate():
+                users.extend(page.get("Users", []))
+
+            total_users = len(users)
+            now = datetime.utcnow()
+            ninety_days_ago = now - timedelta(days=90)
+
+            active_users = 0
+            inactive_users = 0
+            never_logged_in = 0
+            old_access_keys = 0
+
+            for user in users:
+                last_login = user.get("PasswordLastUsed")
+                if last_login:
+                    if last_login.replace(tzinfo=None) >= ninety_days_ago:
+                        active_users += 1
+                    else:
+                        inactive_users += 1
+                else:
+                    never_logged_in += 1
+
+                # Check for old access keys
+                try:
+                    keys = iam.list_access_keys(UserName=user["UserName"])
+                    for key in keys.get("AccessKeyMetadata", []):
+                        if key.get("Status") == "Active":
+                            created = key.get("CreateDate")
+                            if created and created.replace(tzinfo=None) < ninety_days_ago:
+                                old_access_keys += 1
+                except Exception:
+                    pass
+
+            return {
+                "total_users": total_users,
+                "active_users_90d": active_users,
+                "inactive_users_90d": inactive_users,
+                "never_logged_in": never_logged_in,
+                "old_access_keys": old_access_keys,
+            }
+
+        except Exception as e:
+            print(f"AWS IAM error: {e}")
+            return {"total_users": 0, "active_users_90d": 0}
+
+    def _get_demo_data(self) -> dict:
+        """Realistic demo data for AWS cost and usage analysis."""
+        return {
+            "vendor": "AWS",
+            "demo_mode": True,
+            "report_type": "cloud_cost",
+            "cost_summary": {
+                "total_monthly": 67450,
+                "top_services": [
+                    {"service": "Amazon EC2", "monthly_cost": 28500, "total_6m": 171000, "trend_6m": [26000, 27200, 28000, 28500, 29100, 28500]},
+                    {"service": "Amazon RDS", "monthly_cost": 12800, "total_6m": 76800, "trend_6m": [11500, 12000, 12200, 12800, 13100, 12800]},
+                    {"service": "Amazon S3", "monthly_cost": 6200, "total_6m": 37200, "trend_6m": [5400, 5600, 5800, 6000, 6100, 6200]},
+                    {"service": "Amazon CloudFront", "monthly_cost": 4800, "total_6m": 28800, "trend_6m": [4200, 4400, 4500, 4600, 4700, 4800]},
+                    {"service": "AWS Lambda", "monthly_cost": 3900, "total_6m": 23400, "trend_6m": [3200, 3400, 3500, 3700, 3800, 3900]},
+                    {"service": "Amazon ElastiCache", "monthly_cost": 3200, "total_6m": 19200, "trend_6m": [3200, 3200, 3200, 3200, 3200, 3200]},
+                    {"service": "Amazon EKS", "monthly_cost": 2800, "total_6m": 16800, "trend_6m": [2200, 2400, 2500, 2600, 2700, 2800]},
+                    {"service": "AWS Support (Business)", "monthly_cost": 2100, "total_6m": 12600, "trend_6m": [2100, 2100, 2100, 2100, 2100, 2100]},
+                    {"service": "Amazon OpenSearch", "monthly_cost": 1850, "total_6m": 11100, "trend_6m": [1850, 1850, 1850, 1850, 1850, 1850]},
+                    {"service": "Amazon DynamoDB", "monthly_cost": 1300, "total_6m": 7800, "trend_6m": [1100, 1150, 1200, 1250, 1280, 1300]},
+                ],
+            },
+            "reservations": {
+                "utilization_pct": 72.5,
+                "purchased_hours": 43800,
+                "used_hours": 31755,
+                "unused_hours": 12045,
+                "net_savings": 8200,
+                "has_reservations": True,
+            },
+            "idle_resources": {
+                "ec2_stopped": 14,
+                "ebs_unattached": 47,
+                "eip_unassociated": 8,
+                "estimated_waste": 3420,
+            },
+            "iam_summary": {
+                "total_users": 185,
+                "active_users_90d": 142,
+                "inactive_users_90d": 28,
+                "never_logged_in": 15,
+                "old_access_keys": 34,
+            },
+            "licenses": [
+                {"product_name": "Amazon EC2", "total_licenses": 0, "assigned_licenses": 0, "active_users": 0, "unused_licenses": 0, "utilization_pct": 0, "monthly_cost": 28500},
+                {"product_name": "Amazon RDS", "total_licenses": 0, "assigned_licenses": 0, "active_users": 0, "unused_licenses": 0, "utilization_pct": 0, "monthly_cost": 12800},
+                {"product_name": "Amazon S3", "total_licenses": 0, "assigned_licenses": 0, "active_users": 0, "unused_licenses": 0, "utilization_pct": 0, "monthly_cost": 6200},
+            ],
+            "login_activity": {
+                "daily_avg_logins": 0,
+                "unique_users_30d": 142,
+                "total_users": 185,
+            },
+            "retrieved_at": datetime.utcnow().isoformat(),
         }
 
 
