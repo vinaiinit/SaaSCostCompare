@@ -5,6 +5,7 @@ license counts, active users, and usage metrics.
 """
 import os
 import json
+import base64
 from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
 
@@ -394,28 +395,257 @@ class MicrosoftConnector(VendorConnector):
 
 
 class SAPConnector(VendorConnector):
-    """Placeholder connector for SAP license data."""
+    """Connect to SAP S/4HANA Cloud APIs to pull license and user data."""
 
     vendor_name = "SAP"
 
     def __init__(self):
         self.access_token = None
         self.base_url = None
+        self.demo_mode = False
 
     def authenticate(self, credentials: dict) -> bool:
-        self.base_url = credentials.get("base_url", "").rstrip("/")
-        self.access_token = credentials.get("access_token", "")
-        if not self.base_url or not self.access_token:
+        import requests
+
+        # Demo mode for testing without a real SAP system
+        if credentials.get("demo_mode"):
+            self.demo_mode = True
+            return True
+
+        self.base_url = credentials.get("base_url", "").strip().rstrip("/")
+        if not self.base_url:
             return False
-        return True
+
+        # Basic auth (username + password)
+        if credentials.get("username") and credentials.get("password"):
+            self._auth_header = {
+                "Authorization": "Basic " + base64.standard_b64encode(
+                    f"{credentials['username']}:{credentials['password']}".encode()
+                ).decode()
+            }
+            return self._verify_connection()
+
+        # OAuth 2.0 client credentials (Communication Arrangement)
+        token_url = credentials.get("token_url", "").strip()
+        client_id = credentials.get("client_id", "")
+        client_secret = credentials.get("client_secret", "")
+
+        if token_url and client_id and client_secret:
+            try:
+                resp = requests.post(
+                    token_url,
+                    data={"grant_type": "client_credentials"},
+                    auth=(client_id, client_secret),
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    self.access_token = resp.json().get("access_token")
+                    self._auth_header = {"Authorization": f"Bearer {self.access_token}"}
+                    return self._verify_connection()
+                print(f"SAP OAuth failed: {resp.status_code} {resp.text[:300]}")
+            except Exception as e:
+                print(f"SAP OAuth error: {e}")
+            return False
+
+        return False
+
+    def _verify_connection(self) -> bool:
+        import requests
+        try:
+            resp = requests.get(
+                f"{self.base_url}/sap/opu/odata/sap/API_BUSINESS_USER/User?$top=1&$format=json",
+                headers=self._auth_header,
+                timeout=10,
+                verify=True,
+            )
+            return resp.status_code == 200
+        except Exception as e:
+            print(f"SAP connection verify failed: {e}")
+            return False
+
+    def _odata_get(self, path: str, params: dict = None) -> dict:
+        import requests
+        url = f"{self.base_url}{path}"
+        default_params = {"$format": "json"}
+        if params:
+            default_params.update(params)
+        try:
+            resp = requests.get(
+                url,
+                headers=self._auth_header,
+                params=default_params,
+                timeout=15,
+                verify=True,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            print(f"SAP OData request failed: {resp.status_code} {url}")
+        except Exception as e:
+            print(f"SAP OData error: {e}")
+        return {}
 
     def get_license_summary(self) -> dict:
+        if self.demo_mode:
+            return self._get_demo_data()
+
+        licenses = self._get_user_licenses()
+        login_activity = self._get_login_activity()
+
         return {
             "vendor": "SAP",
-            "licenses": [],
-            "login_activity": {"daily_avg_logins": 0, "unique_users_30d": 0, "total_users": 0},
+            "licenses": licenses,
+            "login_activity": login_activity,
             "retrieved_at": datetime.utcnow().isoformat(),
-            "note": "SAP license analysis requires SAP License Administration Workbench (LAW) access. Full integration coming soon.",
+        }
+
+    def _get_user_licenses(self) -> list:
+        # Get all business users and categorize by license type
+        data = self._odata_get(
+            "/sap/opu/odata/sap/API_BUSINESS_USER/User",
+            {"$select": "UserName,UserID,IsLocked,ValidityStartDate,ValidityEndDate"}
+        )
+        results = data.get("d", {}).get("results", [])
+
+        total_users = len(results)
+        active_users = sum(1 for u in results if not u.get("IsLocked", False))
+        locked_users = total_users - active_users
+
+        # Get role assignments to determine license types
+        role_data = self._odata_get(
+            "/sap/opu/odata/sap/API_BUSINESS_USER/UserAssignment",
+            {"$select": "UserID,RoleID"}
+        )
+        role_results = role_data.get("d", {}).get("results", [])
+        users_with_roles = set(r.get("UserID") for r in role_results)
+
+        # SAP license types based on usage patterns
+        licenses = []
+
+        # Professional users (users with business roles)
+        prof_count = len(users_with_roles)
+        licenses.append({
+            "product_name": "SAP S/4HANA Professional User",
+            "total_licenses": prof_count,
+            "assigned_licenses": prof_count,
+            "active_users": min(prof_count, active_users),
+            "unused_licenses": 0,
+            "utilization_pct": round(min(prof_count, active_users) / max(prof_count, 1) * 100, 1),
+        })
+
+        # Limited Professional (users without specific roles)
+        limited_count = max(total_users - prof_count, 0)
+        if limited_count > 0:
+            licenses.append({
+                "product_name": "SAP S/4HANA Limited Professional User",
+                "total_licenses": limited_count,
+                "assigned_licenses": limited_count,
+                "active_users": max(active_users - prof_count, 0),
+                "unused_licenses": locked_users,
+                "utilization_pct": round((limited_count - locked_users) / max(limited_count, 1) * 100, 1),
+            })
+
+        # Overall summary
+        licenses.insert(0, {
+            "product_name": "All SAP Named Users (Total)",
+            "total_licenses": total_users,
+            "assigned_licenses": total_users,
+            "active_users": active_users,
+            "unused_licenses": locked_users,
+            "utilization_pct": round(active_users / max(total_users, 1) * 100, 1),
+        })
+
+        return licenses
+
+    def _get_login_activity(self) -> dict:
+        # Get active users count from business user API
+        data = self._odata_get(
+            "/sap/opu/odata/sap/API_BUSINESS_USER/User",
+            {"$filter": "IsLocked eq false", "$inlinecount": "allpages", "$top": "1"}
+        )
+
+        total_active = int(data.get("d", {}).get("__count", 0))
+
+        all_data = self._odata_get(
+            "/sap/opu/odata/sap/API_BUSINESS_USER/User",
+            {"$inlinecount": "allpages", "$top": "1"}
+        )
+        total_users = int(all_data.get("d", {}).get("__count", 0))
+
+        return {
+            "daily_avg_logins": 0,
+            "unique_users_30d": total_active,
+            "total_users": total_users,
+        }
+
+    def _get_demo_data(self) -> dict:
+        """Realistic demo data for SAP S/4HANA license analysis."""
+        return {
+            "vendor": "SAP",
+            "demo_mode": True,
+            "licenses": [
+                {
+                    "product_name": "All SAP Named Users (Total)",
+                    "total_licenses": 850,
+                    "assigned_licenses": 850,
+                    "active_users": 680,
+                    "unused_licenses": 170,
+                    "utilization_pct": 80.0,
+                },
+                {
+                    "product_name": "SAP S/4HANA Professional User",
+                    "total_licenses": 320,
+                    "assigned_licenses": 320,
+                    "active_users": 285,
+                    "unused_licenses": 35,
+                    "utilization_pct": 89.1,
+                },
+                {
+                    "product_name": "SAP S/4HANA Limited Professional User",
+                    "total_licenses": 280,
+                    "assigned_licenses": 280,
+                    "active_users": 195,
+                    "unused_licenses": 85,
+                    "utilization_pct": 69.6,
+                },
+                {
+                    "product_name": "SAP Developer User",
+                    "total_licenses": 50,
+                    "assigned_licenses": 50,
+                    "active_users": 42,
+                    "unused_licenses": 8,
+                    "utilization_pct": 84.0,
+                },
+                {
+                    "product_name": "SAP SuccessFactors Employee Central",
+                    "total_licenses": 1200,
+                    "assigned_licenses": 1100,
+                    "active_users": 980,
+                    "unused_licenses": 220,
+                    "utilization_pct": 81.7,
+                },
+                {
+                    "product_name": "SAP Concur Expense",
+                    "total_licenses": 500,
+                    "assigned_licenses": 430,
+                    "active_users": 310,
+                    "unused_licenses": 190,
+                    "utilization_pct": 62.0,
+                },
+                {
+                    "product_name": "SAP Analytics Cloud",
+                    "total_licenses": 100,
+                    "assigned_licenses": 85,
+                    "active_users": 52,
+                    "unused_licenses": 48,
+                    "utilization_pct": 52.0,
+                },
+            ],
+            "login_activity": {
+                "daily_avg_logins": 425,
+                "unique_users_30d": 680,
+                "total_users": 850,
+            },
+            "retrieved_at": datetime.utcnow().isoformat(),
         }
 
 

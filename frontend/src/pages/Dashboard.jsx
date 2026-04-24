@@ -719,9 +719,16 @@ const VENDOR_CREDENTIAL_FIELDS = {
     { key: 'client_id', label: 'Application (Client) ID', placeholder: 'From Azure App Registration', type: 'text' },
     { key: 'client_secret', label: 'Client Secret', placeholder: 'Secret value', type: 'password' },
   ],
-  'SAP': [
-    { key: 'base_url', label: 'SAP System URL', placeholder: 'https://your-sap-instance.com', type: 'text' },
-    { key: 'access_token', label: 'API Token', placeholder: 'Your SAP API token', type: 'password' },
+  'SAP_oauth': [
+    { key: 'base_url', label: 'SAP S/4HANA System URL', placeholder: 'https://my-s4hana.s4hana.cloud.sap', type: 'text' },
+    { key: 'token_url', label: 'OAuth Token URL', placeholder: 'https://my-s4hana.authentication.eu10.hana.ondemand.com/oauth/token', type: 'text' },
+    { key: 'client_id', label: 'Client ID', placeholder: 'From Communication Arrangement', type: 'text' },
+    { key: 'client_secret', label: 'Client Secret', placeholder: 'Client secret', type: 'password' },
+  ],
+  'SAP_basic': [
+    { key: 'base_url', label: 'SAP S/4HANA System URL', placeholder: 'https://my-s4hana.s4hana.cloud.sap', type: 'text' },
+    { key: 'username', label: 'Username', placeholder: 'SAP admin username', type: 'text' },
+    { key: 'password', label: 'Password', placeholder: 'SAP password', type: 'password' },
   ],
   'Oracle': [
     { key: 'instance_url', label: 'Oracle Cloud URL', placeholder: 'https://your-instance.oraclecloud.com', type: 'text' },
@@ -858,9 +865,10 @@ function LicenseAnalysisSection({ vendors }) {
     }
   };
 
-  const credKey = selectedVendor === 'Salesforce' ? `Salesforce_${authMethod}` : selectedVendor;
+  const credKey = selectedVendor === 'Salesforce' ? `Salesforce_${authMethod}`
+    : selectedVendor === 'SAP' ? `SAP_${authMethod}` : selectedVendor;
   const credFields = VENDOR_CREDENTIAL_FIELDS[credKey] || [];
-  const isPlaceholder = ['SAP', 'Oracle', 'Google Cloud', 'AWS'].includes(selectedVendor);
+  const isPlaceholder = ['Oracle', 'Google Cloud', 'AWS'].includes(selectedVendor);
 
   return (
     <div className="card">
@@ -891,7 +899,7 @@ function LicenseAnalysisSection({ vendors }) {
               {vendors.map((v) => (
                 <button
                   key={v}
-                  onClick={() => { setSelectedVendor(v); setAuthMethod('jwt'); setCredentials({}); setResult(null); setError(''); }}
+                  onClick={() => { setSelectedVendor(v); setAuthMethod(v === 'SAP' ? 'oauth' : 'jwt'); setCredentials({}); setResult(null); setError(''); }}
                   className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
                     selectedVendor === v
                       ? 'bg-primary-600 text-white border-primary-600'
@@ -960,6 +968,41 @@ function LicenseAnalysisSection({ vendors }) {
                     </div>
                   )}
 
+                  {/* Auth Method Toggle for SAP */}
+                  {selectedVendor === 'SAP' && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Authentication Method</label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => { setAuthMethod('oauth'); setCredentials({}); }}
+                          className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
+                            authMethod === 'oauth'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-700 border-slate-300 hover:border-emerald-400'
+                          }`}
+                        >
+                          OAuth 2.0 (Communication Arrangement)
+                        </button>
+                        <button
+                          onClick={() => { setAuthMethod('basic'); setCredentials({}); }}
+                          className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
+                            authMethod === 'basic'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-700 border-slate-300 hover:border-emerald-400'
+                          }`}
+                        >
+                          Basic Auth (Username / Password)
+                        </button>
+                        <button
+                          onClick={() => { setAuthMethod('oauth'); setCredentials({ demo_mode: true }); }}
+                          className="px-4 py-2 rounded-lg border text-sm font-medium transition bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100"
+                        >
+                          Demo Mode (Sample Data)
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-3">
                     {credFields.map((field) => (
                       <div key={field.key}>
@@ -987,7 +1030,7 @@ function LicenseAnalysisSection({ vendors }) {
 
                   <button
                     onClick={handleAnalyze}
-                    disabled={analyzing || credFields.filter(f => !f.optional).some(f => !credentials[f.key])}
+                    disabled={analyzing || (!credentials.demo_mode && credFields.filter(f => !f.optional).some(f => !credentials[f.key]))}
                     className="mt-4 btn-primary text-sm disabled:opacity-50 flex items-center gap-2"
                   >
                     {analyzing ? (
@@ -1069,9 +1112,14 @@ function LicenseResultPanel({ result }) {
 
   return (
     <div className="mt-4 border-t border-slate-200 pt-4">
-      <h4 className="text-sm font-bold text-slate-900 mb-3">
-        {result.vendor} — Licence Utilisation Summary
-      </h4>
+      <div className="flex items-center gap-2 mb-3">
+        <h4 className="text-sm font-bold text-slate-900">
+          {result.vendor} — Licence Utilisation Summary
+        </h4>
+        {result.demo_mode && (
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Demo Data</span>
+        )}
+      </div>
 
       {result.note && (
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 mb-4">
