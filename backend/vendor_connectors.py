@@ -80,9 +80,9 @@ class SalesforceConnector(VendorConnector):
         import jwt
         import time
 
-        login_url = credentials.get("login_url", "").strip().rstrip("/")
-        audience = login_url if login_url else "https://login.salesforce.com"
-        token_endpoint = f"{audience}/services/oauth2/token"
+        # JWT bearer must always go through login.salesforce.com, not custom domains
+        audience = "https://login.salesforce.com"
+        token_endpoint = "https://login.salesforce.com/services/oauth2/token"
 
         private_key = credentials.get("private_key", "")
         # Handle escaped newlines from form input
