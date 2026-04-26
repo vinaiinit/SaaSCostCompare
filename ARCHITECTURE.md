@@ -163,7 +163,7 @@ SQLite is a file-based database — fine for local development but not suitable 
 
 ---
 
-### 3.6 AI Analysis — Anthropic Claude API (claude-sonnet-4-6)
+### 3.6 AI Analysis — Anthropic Claude API (claude-3-5-sonnet-20241022)
 
 **What it is:** Anthropic's large language model, accessed via API, used to generate cost insights and benchmark reports.
 
