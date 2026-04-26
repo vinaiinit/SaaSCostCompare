@@ -388,7 +388,7 @@ function ReportCard({ report }) {
   const handlePayment = async () => {
     setActionLoading('payment');
     try {
-      const res = await reportAPI.createPaymentSession(report.id, 9900);
+      const res = await reportAPI.createPaymentSession(report.id, 49900);
       window.location.href = res.data.url;
     } catch (err) {
       alert('Payment failed: ' + (err.response?.data?.detail || 'Unknown error'));
@@ -541,7 +541,7 @@ function ReportCard({ report }) {
                 ? 'Downloading...'
                 : paymentStatus === 'completed'
                 ? 'Download PDF'
-                : 'Unlock & Download — $99'}
+                : 'Unlock & Download — $499'}
             </button>
           )}
         </div>
@@ -566,7 +566,7 @@ function ReportCard({ report }) {
             <div className="bg-gray-50 rounded-xl p-4 mb-6">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm font-medium text-gray-700">Peer Comparison Report</span>
-                <span className="text-lg font-bold text-gray-900">$99</span>
+                <span className="text-lg font-bold text-gray-900">$499</span>
               </div>
               <ul className="space-y-2 text-sm text-gray-600">
                 <li className="flex items-center gap-2">
@@ -596,7 +596,7 @@ function ReportCard({ report }) {
                 disabled={actionLoading === 'payment'}
                 className="flex-1 py-3 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
               >
-                {actionLoading === 'payment' ? 'Processing...' : 'Pay $99'}
+                {actionLoading === 'payment' ? 'Processing...' : 'Pay $499'}
               </button>
             </div>
           </div>

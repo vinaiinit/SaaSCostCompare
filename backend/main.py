@@ -786,7 +786,7 @@ PLANS = [
     {
         "id": "starter",
         "name": "Starter",
-        "price": 99,
+        "price": 499,
         "reports_limit": 3,
         "features": ["Everything in Free", "3 peer comparison reports/month", "Benchmark narratives", "PDF download"],
         "stripe_price_id": os.getenv("STRIPE_STARTER_PRICE_ID", ""),
@@ -794,7 +794,7 @@ PLANS = [
     {
         "id": "professional",
         "name": "Professional",
-        "price": 299,
+        "price": 999,
         "reports_limit": 10,
         "features": ["Everything in Starter", "10 reports/month", "License analysis connectors", "Priority support"],
         "stripe_price_id": os.getenv("STRIPE_PROFESSIONAL_PRICE_ID", ""),

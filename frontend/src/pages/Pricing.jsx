@@ -16,7 +16,7 @@ const PLAN_DETAILS = [
   {
     id: 'starter',
     name: 'Starter',
-    price: 99,
+    price: 499,
     period: '/month',
     description: 'For teams starting to benchmark',
     features: [
@@ -31,7 +31,7 @@ const PLAN_DETAILS = [
   {
     id: 'professional',
     name: 'Professional',
-    price: 299,
+    price: 999,
     period: '/month',
     description: 'For serious cost optimization',
     features: [
