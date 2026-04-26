@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authAPI, reportAPI, licenseAPI, subscriptionAPI } from '../api';
 
 const formatDate = (s) => {
@@ -13,6 +13,7 @@ const formatCurrency = (n) =>
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [user, setUser] = useState(null);
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -107,6 +108,16 @@ export default function Dashboard() {
       </nav>
 
       <div className="max-w-6xl mx-auto px-4 py-8">
+        {/* Payment Success Banner */}
+        {searchParams.get('payment') === 'success' && (
+          <div className="mb-6 p-4 rounded-xl border border-green-200 bg-green-50 flex items-center gap-3">
+            <svg className="w-5 h-5 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            <span className="text-sm font-medium text-green-800">Payment successful! Your report is now unlocked for download.</span>
+          </div>
+        )}
+
         {/* Subscription Banner */}
         <div className="mb-6 p-4 rounded-xl border bg-white shadow-sm flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -268,6 +279,8 @@ function ReportCard({ report }) {
   const [benchmark, setBenchmark] = useState(null);
   const [showBenchmark, setShowBenchmark] = useState(false);
   const [actionLoading, setActionLoading] = useState('');
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState(report.payment_status || 'pending');
 
   // Poll for status updates
   useEffect(() => {
@@ -352,6 +365,10 @@ function ReportCard({ report }) {
   };
 
   const handleDownloadPDF = async () => {
+    if (paymentStatus !== 'completed') {
+      setShowPaymentModal(true);
+      return;
+    }
     setActionLoading('download');
     try {
       const res = await reportAPI.downloadFullReport(report.id);
@@ -363,6 +380,18 @@ function ReportCard({ report }) {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       alert('Download failed: ' + (err.response?.data?.detail || 'Unknown error'));
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  const handlePayment = async () => {
+    setActionLoading('payment');
+    try {
+      const res = await reportAPI.createPaymentSession(report.id, 9900);
+      window.location.href = res.data.url;
+    } catch (err) {
+      alert('Payment failed: ' + (err.response?.data?.detail || 'Unknown error'));
     } finally {
       setActionLoading('');
     }
@@ -508,9 +537,69 @@ function ReportCard({ report }) {
               disabled={!!actionLoading}
               className="btn-primary text-sm disabled:opacity-50"
             >
-              {actionLoading === 'download' ? 'Downloading...' : 'Download PDF'}
+              {actionLoading === 'download'
+                ? 'Downloading...'
+                : paymentStatus === 'completed'
+                ? 'Download PDF'
+                : 'Unlock & Download — $99'}
             </button>
           )}
+        </div>
+      )}
+
+      {/* Payment Modal */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-8">
+            <div className="text-center mb-6">
+              <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-7 h-7 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900">Unlock Full Report</h3>
+              <p className="text-gray-500 mt-2 text-sm">
+                Get your complete peer comparison report with benchmark analysis, cost insights, and negotiation recommendations.
+              </p>
+            </div>
+
+            <div className="bg-gray-50 rounded-xl p-4 mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-medium text-gray-700">Peer Comparison Report</span>
+                <span className="text-lg font-bold text-gray-900">$99</span>
+              </div>
+              <ul className="space-y-2 text-sm text-gray-600">
+                <li className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                  Full peer benchmark comparison
+                </li>
+                <li className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                  Cost optimization insights
+                </li>
+                <li className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                  Downloadable PDF report
+                </li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowPaymentModal(false)}
+                className="flex-1 py-3 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePayment}
+                disabled={actionLoading === 'payment'}
+                className="flex-1 py-3 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+              >
+                {actionLoading === 'payment' ? 'Processing...' : 'Pay $99'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
