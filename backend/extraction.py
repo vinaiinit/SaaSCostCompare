@@ -243,7 +243,7 @@ CONTRACT TEXT:
 
     try:
         message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-6",
             max_tokens=2048,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -368,7 +368,7 @@ def _try_pdf_document_extraction(file_path: str, upload_id: str, org_id: int, db
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
         message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-6",
             max_tokens=2048,
             messages=[{
                 "role": "user",
@@ -438,7 +438,7 @@ def _try_pdf_image_extraction(file_path: str, upload_id: str, org_id: int, db: S
         content = image_blocks + [{"type": "text", "text": _VISION_EXTRACTION_PROMPT}]
 
         message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-6",
             max_tokens=2048,
             messages=[{"role": "user", "content": content}],
         )
@@ -487,7 +487,7 @@ def _try_pdf_pdfplumber_image_extraction(file_path: str, upload_id: str, org_id:
         content = image_blocks + [{"type": "text", "text": _VISION_EXTRACTION_PROMPT}]
 
         message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-6",
             max_tokens=2048,
             messages=[{"role": "user", "content": content}],
         )

@@ -106,6 +106,16 @@ export const campaignAPI = {
     api.get(`/campaign/status/${submissionId}`),
 };
 
+export const subscriptionAPI = {
+  getPlans: () => api.get('/subscription/plans'),
+  getStatus: () => api.get('/subscription/status'),
+  createCheckoutSession: (priceId) =>
+    api.post('/subscription/create-checkout-session', { price_id: priceId }),
+  createPortalSession: () => api.post('/subscription/portal'),
+  checkoutStatus: (sessionId) =>
+    api.get(`/subscription/checkout-status?session_id=${sessionId}`),
+};
+
 export const contactAPI = {
   submit: (name, email, company, message) =>
     api.post('/contact', { name, email, company, message }),

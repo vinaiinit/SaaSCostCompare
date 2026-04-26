@@ -60,6 +60,29 @@ class User(Base):
 
     organization = relationship("Organization", back_populates="users")
     reports = relationship("Report", back_populates="owner")
+    subscription = relationship("Subscription", back_populates="user", uselist=False)
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), index=True)
+    stripe_customer_id = Column(String, unique=True, nullable=True, index=True)
+    stripe_subscription_id = Column(String, unique=True, nullable=True, index=True)
+    plan = Column(String, default="free")  # free, starter, professional, enterprise
+    status = Column(String, default="active")  # active, past_due, canceled, trialing
+    current_period_start = Column(DateTime, nullable=True)
+    current_period_end = Column(DateTime, nullable=True)
+    reports_used_this_period = Column(Integer, default=0)
+    reports_limit = Column(Integer, default=0)
+    cancel_at_period_end = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="subscription")
+    organization = relationship("Organization")
 
 
 class Report(Base):

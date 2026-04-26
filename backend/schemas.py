@@ -136,3 +136,34 @@ class CampaignSubmitRequest(BaseModel):
     company_name: Optional[str] = None
     industry: Optional[str] = None
     company_size: Optional[int] = None
+
+
+# ── Subscription / Payment ──────────────────────────────────────────────────
+
+class CreateCheckoutRequest(BaseModel):
+    price_id: str
+
+
+class CheckoutSessionResponse(BaseModel):
+    client_secret: str
+
+
+class SubscriptionStatusResponse(BaseModel):
+    plan: str
+    status: str
+    reports_used: int
+    reports_limit: int
+    current_period_end: Optional[datetime] = None
+    cancel_at_period_end: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class PlanInfo(BaseModel):
+    id: str
+    name: str
+    price: int
+    reports_limit: int
+    features: List[str]
+    stripe_price_id: Optional[str] = None

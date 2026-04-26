@@ -18,7 +18,7 @@ from database import engine, get_db, Base
 from models import (
     User, Organization, Report, BenchmarkReport, PasswordResetToken,
     ContactInquiry, ContractLineItem, VendorCatalog, DataCoverageStats,
-    CampaignSubmission, LicenseAnalysis, AuditLog,
+    CampaignSubmission, LicenseAnalysis, AuditLog, Subscription,
 )
 from auth import hash_password, verify_password, create_access_token, verify_token
 from audit import log_event
@@ -35,6 +35,10 @@ from schemas import (
     LineItemResponse,
     LineItemUpdate,
     CampaignSubmitRequest,
+    CreateCheckoutRequest,
+    CheckoutSessionResponse,
+    SubscriptionStatusResponse,
+    PlanInfo,
 )
 from ai_analysis import process_upload, generate_narrative
 from comparison_engine import generate_comparison, feasibility_check, refresh_coverage_stats
@@ -200,6 +204,16 @@ def register_user(user: UserCreate, request: Request, db: Session = Depends(get_
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
+
+    free_sub = Subscription(
+        user_id=db_user.id,
+        org_id=db_user.org_id,
+        plan="free",
+        status="active",
+        reports_limit=0,
+    )
+    db.add(free_sub)
+    db.commit()
 
     log_event(db, action="user.register", user_id=db_user.id,
               resource_type="user", resource_id=str(db_user.id),
@@ -758,7 +772,105 @@ def campaign_status(submission_id: int, db: Session = Depends(get_db)):
     }
 
 
-# --- Payment endpoints (kept for future use) ---
+# --- Subscription & Payment endpoints ---
+
+PLANS = [
+    {
+        "id": "free",
+        "name": "Free",
+        "price": 0,
+        "reports_limit": 0,
+        "features": ["Upload contracts", "AI extraction", "Data coverage view"],
+        "stripe_price_id": None,
+    },
+    {
+        "id": "starter",
+        "name": "Starter",
+        "price": 99,
+        "reports_limit": 3,
+        "features": ["Everything in Free", "3 peer comparison reports/month", "Benchmark narratives", "PDF download"],
+        "stripe_price_id": os.getenv("STRIPE_STARTER_PRICE_ID", ""),
+    },
+    {
+        "id": "professional",
+        "name": "Professional",
+        "price": 299,
+        "reports_limit": 10,
+        "features": ["Everything in Starter", "10 reports/month", "License analysis connectors", "Priority support"],
+        "stripe_price_id": os.getenv("STRIPE_PROFESSIONAL_PRICE_ID", ""),
+    },
+    {
+        "id": "enterprise",
+        "name": "Enterprise",
+        "price": -1,
+        "reports_limit": -1,
+        "features": ["Everything in Professional", "Unlimited reports", "Dedicated account manager", "Custom integrations"],
+        "stripe_price_id": None,
+    },
+]
+
+
+@app.get("/subscription/plans")
+def get_plans():
+    return [
+        {**p, "stripe_price_id": p["stripe_price_id"] or None}
+        for p in PLANS
+    ]
+
+
+@app.get("/subscription/status")
+def subscription_status(
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    from payment import get_subscription_status
+    return get_subscription_status(user_id, db)
+
+
+@app.post("/subscription/create-checkout-session")
+def create_subscription_checkout(
+    req: CreateCheckoutRequest,
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    from payment import create_subscription_checkout_session
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        client_secret = create_subscription_checkout_session(user, req.price_id, db)
+        return {"client_secret": client_secret}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/subscription/portal")
+def create_portal(
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    from payment import create_customer_portal_session
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        url = create_customer_portal_session(user, db)
+        return {"url": url}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/subscription/checkout-status")
+def checkout_session_status(
+    session_id: str,
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    import stripe
+    session = stripe.checkout.Session.retrieve(session_id)
+    return {"status": session.status}
+
+
 class PaymentRequest(BaseModel):
     report_id: str
     amount: int
@@ -769,7 +881,6 @@ def create_checkout(
     user_id: int = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    import stripe
     from payment import create_payment_session
     report = db.query(Report).filter(Report.id == payment_req.report_id).first()
     if not report or report.owner_id != user_id:

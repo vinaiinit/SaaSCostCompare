@@ -6,6 +6,9 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import Campaign from './pages/Campaign';
+import Pricing from './pages/Pricing';
+import Checkout from './pages/Checkout';
+import CheckoutReturn from './pages/CheckoutReturn';
 import './index.css';
 
 function PrivateRoute({ children }) {
@@ -32,7 +35,24 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/pricing" element={<Pricing />} />
         <Route path="/campaign" element={<Campaign />} />
+        <Route
+          path="/checkout"
+          element={
+            <PrivateRoute>
+              <Checkout />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/checkout/return"
+          element={
+            <PrivateRoute>
+              <CheckoutReturn />
+            </PrivateRoute>
+          }
+        />
         <Route
           path="/dashboard"
           element={

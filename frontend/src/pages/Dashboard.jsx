@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authAPI, reportAPI, licenseAPI } from '../api';
+import { authAPI, reportAPI, licenseAPI, subscriptionAPI } from '../api';
 
 const formatDate = (s) => {
   if (!s) return '—';
@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [vendorName, setVendorName] = useState('');
+  const [subscription, setSubscription] = useState({ plan: 'free', status: 'active', reports_used: 0, reports_limit: 0 });
 
   const VENDORS = [
     'Microsoft (M365/Azure)',
@@ -31,12 +32,14 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const [userRes, reportsRes] = await Promise.all([
+        const [userRes, reportsRes, subRes] = await Promise.all([
           authAPI.getCurrentUser(),
           reportAPI.listReports(),
+          subscriptionAPI.getStatus(),
         ]);
         setUser(userRes.data);
         setReports(reportsRes.data);
+        setSubscription(subRes.data);
       } catch (err) {
         localStorage.removeItem('token');
         navigate('/login');
@@ -93,6 +96,9 @@ export default function Dashboard() {
               <p className="text-sm text-slate-600">{user?.full_name}</p>
               <p className="text-xs text-slate-500">{user?.email}</p>
             </div>
+            <button onClick={() => navigate('/pricing')} className="text-sm font-medium text-primary-600 hover:text-primary-700">
+              Pricing
+            </button>
             <button onClick={handleLogout} className="btn-secondary text-sm">
               Logout
             </button>
@@ -101,6 +107,52 @@ export default function Dashboard() {
       </nav>
 
       <div className="max-w-6xl mx-auto px-4 py-8">
+        {/* Subscription Banner */}
+        <div className="mb-6 p-4 rounded-xl border bg-white shadow-sm flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
+              subscription.plan === 'free' ? 'bg-gray-100 text-gray-600' :
+              subscription.plan === 'starter' ? 'bg-blue-100 text-blue-700' :
+              subscription.plan === 'professional' ? 'bg-purple-100 text-purple-700' :
+              'bg-amber-100 text-amber-700'
+            }`}>
+              {subscription.plan}
+            </span>
+            <span className="text-sm text-slate-600">
+              {subscription.plan === 'free'
+                ? 'Upgrade to unlock peer comparison reports'
+                : subscription.reports_limit === -1
+                ? 'Unlimited reports'
+                : `${subscription.reports_used} / ${subscription.reports_limit} reports used this period`}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            {subscription.plan !== 'free' && (
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await subscriptionAPI.createPortalSession();
+                    window.location.href = res.data.url;
+                  } catch (err) {
+                    alert('Could not open billing portal');
+                  }
+                }}
+                className="text-sm text-slate-500 hover:text-slate-700 underline"
+              >
+                Manage Billing
+              </button>
+            )}
+            {subscription.plan === 'free' && (
+              <button
+                onClick={() => navigate('/pricing')}
+                className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition"
+              >
+                Upgrade
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Upload Section */}
         <div className="mb-8">
           <div className="card p-8">
