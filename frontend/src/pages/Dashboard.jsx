@@ -233,7 +233,17 @@ function ReportCard({ report }) {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState(report.payment_status || 'pending');
 
-  // Poll for status updates
+  // Fetch full status on mount (report list doesn't include extraction_summary)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await reportAPI.getReportStatus(report.id);
+        setStatus(res.data);
+      } catch {}
+    })();
+  }, [report.id]);
+
+  // Poll for status updates while processing
   useEffect(() => {
     const FINAL = ['extracted', 'completed', 'failed', 'error'];
     if (FINAL.includes(status.status)) return;
