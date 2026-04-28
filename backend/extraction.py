@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Extraction pipeline: Convert uploaded files (CSV, PDF, ZIP) into
 structured ContractLineItem rows in the database.
@@ -166,7 +168,8 @@ def extract_from_pdf(file_path: str, upload_id: str, org_id: int, db: Session) -
     if not items:
         warnings.append(
             f"{basename}: Could not extract structured line items from this PDF. "
-            "The document may not contain tabular pricing data."
+            "The document may not contain tabular pricing data. "
+            "This may be due to a temporary API error — please try uploading again."
         )
 
     return items, warnings
@@ -241,12 +244,26 @@ Rules:
 CONTRACT TEXT:
 {pdf_text[:6000]}"""
 
+    import time
+    last_err = None
+    for attempt in range(3):
+        try:
+            message = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=2048,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            break
+        except Exception as api_err:
+            last_err = api_err
+            print(f"AI extraction attempt {attempt + 1} failed: {api_err}")
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+    else:
+        print(f"AI extraction failed after 3 attempts: {last_err}")
+        return []
+
     try:
-        message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}],
-        )
         response_text = message.content[0].text.strip()
 
         # Strip markdown code fences if present
@@ -367,24 +384,37 @@ def _try_pdf_document_extraction(file_path: str, upload_id: str, org_id: int, db
         pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-        message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2048,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "document",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "application/pdf",
-                            "data": pdf_b64,
-                        },
-                    },
-                    {"type": "text", "text": _VISION_EXTRACTION_PROMPT},
-                ],
-            }],
-        )
+        import time
+        last_err = None
+        for attempt in range(3):
+            try:
+                message = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=2048,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "document",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "application/pdf",
+                                    "data": pdf_b64,
+                                },
+                            },
+                            {"type": "text", "text": _VISION_EXTRACTION_PROMPT},
+                        ],
+                    }],
+                )
+                break
+            except Exception as api_err:
+                last_err = api_err
+                print(f"Document extraction attempt {attempt + 1} failed: {api_err}")
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+        else:
+            print(f"Document extraction failed after 3 attempts: {last_err}")
+            return []
 
         items = _parse_ai_response_to_items(
             message.content[0].text, upload_id, org_id, db, "pdf_vision"

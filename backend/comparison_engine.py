@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Peer comparison engine — pure database-driven, no AI.
 

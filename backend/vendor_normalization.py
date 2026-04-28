@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Vendor and product name normalization.
 Maps raw input (messy CSV values, PDF-extracted text) to canonical names.

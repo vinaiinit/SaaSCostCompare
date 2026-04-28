@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Vendor API connectors for pulling real-time license utilization data.
 Each connector authenticates with the vendor's API and retrieves
