@@ -3,6 +3,9 @@
 RQ Worker for background tasks.
 Run: python worker.py
 """
+from dotenv import load_dotenv
+load_dotenv()
+
 from job_queue import redis_conn, job_queue
 from rq import Worker
 
