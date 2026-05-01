@@ -605,6 +605,8 @@ function LineItemsPanel({ items }) {
               <th className="px-3 py-2 font-medium text-slate-600 text-right">Unit Price</th>
               <th className="px-3 py-2 font-medium text-slate-600 text-right">Annual Cost</th>
               <th className="px-3 py-2 font-medium text-slate-600">Billing</th>
+              <th className="px-3 py-2 font-medium text-slate-600">Start Date</th>
+              <th className="px-3 py-2 font-medium text-slate-600">End Date</th>
               <th className="px-3 py-2 font-medium text-slate-600">Source</th>
             </tr>
           </thead>
@@ -617,6 +619,8 @@ function LineItemsPanel({ items }) {
                 <td className="px-3 py-2 text-right text-slate-700">{formatCurrency(item.unit_price)}</td>
                 <td className="px-3 py-2 text-right font-medium text-slate-900">{formatCurrency(item.total_cost_annual)}</td>
                 <td className="px-3 py-2 text-slate-500">{item.billing_frequency}</td>
+                <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{formatDate(item.contract_start_date)}</td>
+                <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{formatDate(item.contract_end_date)}</td>
                 <td className="px-3 py-2">
                   <span className={`text-xs px-1.5 py-0.5 rounded ${
                     item.extraction_source === 'csv' ? 'bg-green-50 text-green-700' :

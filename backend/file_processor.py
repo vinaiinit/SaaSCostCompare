@@ -15,6 +15,52 @@ def _has_meaningful_text(text: str) -> bool:
     return len(stripped) > 30
 
 
+def extract_pages_from_pdf(file_path: str) -> list:
+    """Extract text from each page separately. Returns [{"page": 1, "text": "..."}, ...]."""
+    pages = _extract_pages_with_pdfplumber(file_path)
+    if pages and any(p["text"].strip() for p in pages):
+        return pages
+    return _extract_pages_with_pypdf2(file_path)
+
+
+def _extract_pages_with_pdfplumber(file_path: str) -> list:
+    """Extract per-page text using pdfplumber, including table content."""
+    import pdfplumber
+    pages = []
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            for i, page in enumerate(pdf.pages):
+                parts = []
+                page_text = page.extract_text()
+                if page_text:
+                    parts.append(page_text)
+                tables = page.extract_tables()
+                for table in tables:
+                    for row in table:
+                        if row:
+                            cells = [str(cell or "").strip() for cell in row]
+                            if any(cells):
+                                parts.append(" | ".join(cells))
+                pages.append({"page": i + 1, "text": "\n".join(parts)})
+    except Exception as e:
+        print(f"Error extracting pages with pdfplumber: {e}")
+    return pages
+
+
+def _extract_pages_with_pypdf2(file_path: str) -> list:
+    """Fallback per-page extraction using PyPDF2."""
+    pages = []
+    try:
+        from PyPDF2 import PdfReader
+        reader = PdfReader(file_path)
+        for i, page in enumerate(reader.pages):
+            text = page.extract_text() or ""
+            pages.append({"page": i + 1, "text": text})
+    except Exception as e:
+        print(f"Error extracting pages with PyPDF2: {e}")
+    return pages
+
+
 def extract_text_from_pdf(file_path: str) -> str:
     """Extract text from a PDF file. Tries pdfplumber first, falls back to PyPDF2."""
     text = _extract_with_pdfplumber(file_path)

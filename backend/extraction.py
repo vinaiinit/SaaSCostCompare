@@ -9,6 +9,7 @@ PDF → AI structured extraction (Claude extracts rows, not analysis)
 ZIP → unpack, then process each file
 """
 import os
+import re
 import json
 import csv
 import io
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from models import ContractLineItem, Report, Organization
 from vendor_normalization import normalize_line_item
-from file_processor import extract_text_from_pdf, extract_text_from_docx, process_zip
+from file_processor import extract_text_from_pdf, extract_text_from_docx, process_zip, extract_pages_from_pdf
 
 
 def _parse_float(val) -> float:
@@ -141,6 +142,100 @@ def extract_from_csv(file_path: str, upload_id: str, org_id: int, db: Session) -
     return items
 
 
+# ── Page scoring & chunking for large PDFs ─────────────────────────────────
+
+_PRICING_KEYWORDS = [
+    'price', 'cost', 'total', 'amount', 'fee', 'charge',
+    'quantity', 'qty', 'unit', 'annual', 'monthly', 'yearly',
+    'subscription', 'license', 'licence', 'per user', 'per seat',
+    'discount', 'subtotal', 'grand total', 'invoice',
+    'quotation', 'quote', 'order form', 'line item',
+    'extended', 'net', 'gross', 'rate', 'sku', 'part number',
+]
+
+
+def _score_page_for_pricing(text: str) -> float:
+    """Score a page's likelihood of containing pricing data."""
+    if not text:
+        return 0.0
+    lower = text.lower()
+    score = 0.0
+    for kw in _PRICING_KEYWORDS:
+        score += lower.count(kw) * 2
+    score += len(re.findall(r'\$[\d,]+\.?\d*', text)) * 3
+    score += len(re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d{2})\b', text)) * 1.5
+    score += text.count('|') * 0.5
+    return score
+
+
+def _build_pricing_chunks(pages: list, max_chars_per_chunk: int = 5000, max_chunks: int = 8) -> list:
+    """Select top pricing-relevant pages and group into chunks."""
+    scored = [(p, _score_page_for_pricing(p["text"])) for p in pages]
+    relevant = [(p, s) for p, s in scored if s > 2]
+
+    if not relevant:
+        all_text = "\n".join(p["text"] for p in pages if p["text"])
+        return [all_text[:max_chars_per_chunk * 2]]
+
+    relevant.sort(key=lambda x: x[1], reverse=True)
+
+    selected = []
+    total_chars = 0
+    for p, s in relevant:
+        if total_chars + len(p["text"]) > max_chars_per_chunk * max_chunks:
+            break
+        selected.append(p)
+        total_chars += len(p["text"])
+
+    selected.sort(key=lambda p: p["page"])
+
+    chunks = []
+    current_pages = []
+    current_size = 0
+    for p in selected:
+        if current_size + len(p["text"]) > max_chars_per_chunk and current_pages:
+            chunks.append("\n\n".join(
+                f"[Page {cp['page']}]\n{cp['text']}" for cp in current_pages
+            ))
+            current_pages = []
+            current_size = 0
+        current_pages.append(p)
+        current_size += len(p["text"])
+    if current_pages:
+        chunks.append("\n\n".join(
+            f"[Page {cp['page']}]\n{cp['text']}" for cp in current_pages
+        ))
+
+    return chunks[:max_chunks]
+
+
+def _ai_extract_chunked(chunks: list, upload_id: str, org_id: int, db: Session) -> list:
+    """Extract line items from multiple text chunks and merge results."""
+    all_items = []
+    for i, chunk in enumerate(chunks):
+        print(f"Extracting chunk {i + 1}/{len(chunks)} ({len(chunk)} chars)...")
+        items = _ai_extract_line_items(chunk, upload_id, org_id, db)
+        all_items.extend(items)
+    return _dedup_items(all_items)
+
+
+def _dedup_items(items: list) -> list:
+    """Remove duplicate line items based on key fields."""
+    seen = set()
+    unique = []
+    for item in items:
+        key = (
+            (item.vendor_name or "").lower(),
+            (item.product_name or "").lower(),
+            item.quantity,
+            item.unit_price,
+        )
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique
+
+
 # ── PDF extraction (AI structured extraction) ────────────────────────────────
 
 def extract_from_pdf(file_path: str, upload_id: str, org_id: int, db: Session) -> tuple[list[ContractLineItem], list[str]]:
@@ -158,7 +253,16 @@ def extract_from_pdf(file_path: str, upload_id: str, org_id: int, db: Session) -
 
     items = []
     if text and len(meaningful) >= 30:
-        items = _ai_extract_line_items(text, upload_id, org_id, db)
+        if len(text) > 12000:
+            pages = extract_pages_from_pdf(file_path)
+            if pages:
+                chunks = _build_pricing_chunks(pages)
+                print(f"Large PDF detected ({len(text)} chars, {len(pages)} pages) — "
+                      f"using chunked extraction with {len(chunks)} chunk(s)")
+                items = _ai_extract_chunked(chunks, upload_id, org_id, db)
+
+        if not items:
+            items = _ai_extract_line_items(text, upload_id, org_id, db)
 
     # If text extraction produced nothing, fall back to vision-based PDF reading
     if not items:
@@ -242,7 +346,7 @@ Rules:
 - Return ONLY valid JSON, no other text, no markdown, no explanation.
 
 CONTRACT TEXT:
-{pdf_text[:6000]}"""
+{pdf_text[:12000]}"""
 
     import time
     last_err = None
@@ -250,7 +354,7 @@ CONTRACT TEXT:
         try:
             message = client.messages.create(
                 model="claude-sonnet-4-6",
-                max_tokens=2048,
+                max_tokens=4096,
                 messages=[{"role": "user", "content": prompt}],
             )
             break
@@ -377,7 +481,7 @@ def _try_pdf_document_extraction(file_path: str, upload_id: str, org_id: int, db
         with open(file_path, "rb") as f:
             pdf_bytes = f.read()
 
-        if len(pdf_bytes) > 10 * 1024 * 1024:
+        if len(pdf_bytes) > 32 * 1024 * 1024:
             print(f"PDF too large for vision extraction: {len(pdf_bytes)} bytes")
             return []
 
@@ -390,7 +494,7 @@ def _try_pdf_document_extraction(file_path: str, upload_id: str, org_id: int, db
             try:
                 message = client.messages.create(
                     model="claude-sonnet-4-6",
-                    max_tokens=2048,
+                    max_tokens=4096,
                     messages=[{
                         "role": "user",
                         "content": [
@@ -445,8 +549,19 @@ def _try_pdf_image_extraction(file_path: str, upload_id: str, org_id: int, db: S
 
     try:
         doc = fitz.open(file_path)
+        page_indices = list(range(min(doc.page_count, 5)))
+
+        if doc.page_count > 10:
+            pages_data = extract_pages_from_pdf(file_path)
+            if pages_data:
+                scored = [(i, _score_page_for_pricing(p["text"])) for i, p in enumerate(pages_data)]
+                scored.sort(key=lambda x: x[1], reverse=True)
+                page_indices = sorted([idx for idx, _ in scored[:5]])
+
         image_blocks = []
-        for page_num in range(min(doc.page_count, 5)):
+        for page_num in page_indices:
+            if page_num >= doc.page_count:
+                continue
             page = doc[page_num]
             pix = page.get_pixmap(dpi=200)
             img_bytes = pix.tobytes("png")
@@ -469,7 +584,7 @@ def _try_pdf_image_extraction(file_path: str, upload_id: str, org_id: int, db: S
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=2048,
+            max_tokens=4096,
             messages=[{"role": "user", "content": content}],
         )
 
@@ -496,7 +611,19 @@ def _try_pdf_pdfplumber_image_extraction(file_path: str, upload_id: str, org_id:
 
         image_blocks = []
         with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages[:5]:
+            page_indices = list(range(min(len(pdf.pages), 5)))
+
+            if len(pdf.pages) > 10:
+                pages_data = extract_pages_from_pdf(file_path)
+                if pages_data:
+                    scored = [(i, _score_page_for_pricing(p["text"])) for i, p in enumerate(pages_data)]
+                    scored.sort(key=lambda x: x[1], reverse=True)
+                    page_indices = sorted([idx for idx, _ in scored[:5]])
+
+            for idx in page_indices:
+                if idx >= len(pdf.pages):
+                    continue
+                page = pdf.pages[idx]
                 img = page.to_image(resolution=200)
                 buf = BytesIO()
                 img.save(buf, format="PNG")
@@ -518,7 +645,7 @@ def _try_pdf_pdfplumber_image_extraction(file_path: str, upload_id: str, org_id:
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=2048,
+            max_tokens=4096,
             messages=[{"role": "user", "content": content}],
         )
 
