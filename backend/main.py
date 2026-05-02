@@ -529,6 +529,35 @@ def update_line_item(
     return {"message": "Line item updated", "item_id": item.id}
 
 
+# --- Re-normalize line items ---
+@app.post("/admin/renormalize")
+def renormalize_all_line_items(
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    from vendor_normalization import normalize_line_item, seed_vendor_catalog
+    seed_vendor_catalog(db)
+
+    items = db.query(ContractLineItem).all()
+    updated = 0
+    for item in items:
+        old_vendor, old_product = item.vendor_name, item.product_name
+        new_vendor, new_product = normalize_line_item(
+            old_vendor, old_product, db
+        )
+        if new_vendor != old_vendor or new_product != old_product:
+            item.vendor_name = new_vendor
+            item.product_name = new_product
+            updated += 1
+
+    db.commit()
+    return {
+        "total_items": len(items),
+        "updated": updated,
+        "message": f"Re-normalized {updated} of {len(items)} line items",
+    }
+
+
 # --- Feasibility check ---
 @app.post("/uploads/{upload_id}/feasibility")
 def check_feasibility(
