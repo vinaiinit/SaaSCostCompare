@@ -25,3 +25,4 @@ PyJWT
 cryptography
 oci
 slowapi
+openpyxl

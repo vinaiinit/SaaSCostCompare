@@ -173,6 +173,46 @@ class ProductCatalog(Base):
     vendor = relationship("VendorCatalog", back_populates="products")
 
 
+class PriceList(Base):
+    """Metadata about an imported vendor list-price file."""
+    __tablename__ = "price_lists"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vendor_name = Column(String, index=True)
+    source_filename = Column(String)
+    effective_date = Column(Date, nullable=True)
+    fx_rate_metadata = Column(JSON, nullable=True)
+    total_rows_imported = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    prices = relationship("ListPrice", back_populates="price_list")
+
+
+class ListPrice(Base):
+    """Individual SKU list prices imported from a vendor price book."""
+    __tablename__ = "list_prices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    price_list_id = Column(Integer, ForeignKey("price_lists.id"), index=True)
+    vendor_name = Column(String, index=True)
+    product_name_raw = Column(String)
+    product_name_canonical = Column(String, index=True)
+    manufacturer_part_number = Column(String, nullable=True, index=True)
+    list_price_usd = Column(Float, default=0.0)
+    naspo_price = Column(Float, nullable=True)
+    list_price_gbp = Column(Float, nullable=True)
+    list_price_aud = Column(Float, nullable=True)
+    list_price_cad = Column(Float, nullable=True)
+    list_price_aed = Column(Float, nullable=True)
+    duration_years = Column(Float, default=1.0)
+    list_price_annual_usd = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    price_list = relationship("PriceList", back_populates="prices")
+
+
 class DataCoverageStats(Base):
     """Cached statistics for feasibility checks and coverage dashboard."""
     __tablename__ = "data_coverage_stats"

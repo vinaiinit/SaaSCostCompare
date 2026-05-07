@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from models import ContractLineItem, Organization, Report
+from list_price_engine import get_list_price_for_item
 
 
 MINIMUM_PEERS = 5
@@ -150,10 +151,10 @@ def compare_line_item(item: ContractLineItem, org: Organization, db: Session) ->
                 "assessment": assessment,
                 "potential_annual_savings": potential_savings,
             })
+            result.update(get_list_price_for_item(item, db))
             return result
 
     # Not enough peers in any tier
-    # Get whatever data exists for context
     all_peers = _get_peer_costs(db, item.vendor_name, item.product_name, org.id)
     result.update({
         "has_sufficient_peers": False,
@@ -162,6 +163,7 @@ def compare_line_item(item: ContractLineItem, org: Organization, db: Session) ->
         "peer_org_count": 0,
         "insufficient_data": True,
     })
+    result.update(get_list_price_for_item(item, db))
     return result
 
 
@@ -233,6 +235,22 @@ def generate_comparison(upload_id: str, db: Session) -> dict:
         "assessment_breakdown": assessment_breakdown,
         "generated_at": str(datetime.now()),
     }
+
+    # Discount summary from list prices
+    items_with_discount = [r for r in item_results if r.get("discount_pct") is not None]
+    if items_with_discount:
+        avg_discount = sum(r["discount_pct"] for r in items_with_discount) / len(items_with_discount)
+        total_list_value = sum(
+            (r.get("list_price_annual") or 0) * r.get("user_quantity", 1)
+            for r in items_with_discount
+        )
+        summary["avg_discount_pct"] = round(avg_discount, 1)
+        summary["items_with_list_price"] = len(items_with_discount)
+        summary["total_list_price_annual"] = round(total_list_value, 2)
+    else:
+        summary["avg_discount_pct"] = None
+        summary["items_with_list_price"] = 0
+        summary["total_list_price_annual"] = None
 
     return {"items": item_results, "summary": summary}
 
