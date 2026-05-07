@@ -27,37 +27,39 @@ BLACK     = colors.HexColor("#0f172a")
 GREEN     = colors.HexColor("#16a34a")
 RED       = colors.HexColor("#dc2626")
 
+PAGE_W, PAGE_H = A4
+
 
 def _header_footer(canvas, doc):
     """Draw header bar and footer on every page."""
     canvas.saveState()
-    w, h = A4
 
     # Top navy bar
     canvas.setFillColor(NAVY)
-    canvas.rect(0, h - 18*mm, w, 18*mm, fill=1, stroke=0)
+    canvas.rect(0, PAGE_H - 18*mm, PAGE_W, 18*mm, fill=1, stroke=0)
 
-    # Logo text in header
     canvas.setFillColor(WHITE)
     canvas.setFont("Helvetica-Bold", 11)
-    canvas.drawString(20*mm, h - 12*mm, "SaaSCostCompare")
+    canvas.drawString(20*mm, PAGE_H - 12*mm, "SaaSCostCompare")
     canvas.setFont("Helvetica", 8)
-    canvas.drawRightString(w - 20*mm, h - 12*mm, "CONFIDENTIAL — FOR AUTHORISED USE ONLY")
+    canvas.drawRightString(PAGE_W - 20*mm, PAGE_H - 12*mm, "CONFIDENTIAL — FOR AUTHORISED USE ONLY")
 
-    # Footer line
+    # Footer
     canvas.setStrokeColor(SLATE_MID)
     canvas.setLineWidth(0.5)
-    canvas.line(20*mm, 14*mm, w - 20*mm, 14*mm)
+    canvas.line(20*mm, 14*mm, PAGE_W - 20*mm, 14*mm)
 
     canvas.setFillColor(SLATE)
     canvas.setFont("Helvetica", 7.5)
     canvas.drawString(20*mm, 9*mm,
         "© {} SaaSCostCompare. Independent SaaS Benchmarking. Vendor-neutral. Conflict-free.".format(
             datetime.now().year))
-    canvas.drawRightString(w - 20*mm, 9*mm, f"Page {doc.page}")
+    canvas.drawRightString(PAGE_W - 20*mm, 9*mm, f"Page {doc.page}")
 
     canvas.restoreState()
 
+
+# ── Helper functions ───────────────────────────────────────────────────────
 
 def _fmt_currency(val):
     if val is None:
@@ -68,13 +70,51 @@ def _fmt_currency(val):
         return "—"
 
 
-def _fmt_pct(val):
+def _fmt_number(val):
     if val is None:
         return "—"
     try:
-        return "{:.1f}%".format(float(val))
+        return "{:,.0f}".format(float(val))
     except Exception:
         return "—"
+
+
+def _compute_variance_pct(user_cost, peer_median):
+    if not peer_median or peer_median == 0:
+        return 0.0
+    return ((user_cost - peer_median) / peer_median) * 100
+
+
+def _fmt_variance(pct):
+    if pct > 0:
+        return "+{:.0f}%".format(pct)
+    elif pct < 0:
+        return "{:.0f}%".format(pct)
+    return "0%"
+
+
+def _derive_recommendation(item):
+    assessment = item.get("assessment", "")
+    variance = _compute_variance_pct(
+        item.get("user_unit_cost_annual", 0),
+        item.get("peer_median", 0),
+    )
+    abs_var = abs(variance)
+
+    if assessment == "above_market":
+        if abs_var > 25:
+            return "Consider alternative tier"
+        elif abs_var > 10:
+            return "Negotiate volume discount"
+        else:
+            return "Renegotiate at renewal"
+    elif assessment == "at_market":
+        return "Standard pricing"
+    elif assessment == "below_market":
+        return "Competitive rate"
+    elif assessment == "well_below_market":
+        return "Well positioned"
+    return "Monitor"
 
 
 def _parse_benchmark_sections(text):
@@ -95,52 +135,186 @@ def _parse_benchmark_sections(text):
     return sections
 
 
-def _is_table_line(line: str) -> bool:
-    return line.strip().startswith("|") and line.strip().endswith("|")
+def _get_section_body(sections, title):
+    """Find a section by title (case-insensitive partial match)."""
+    title_lower = title.lower()
+    for sec in sections:
+        if title_lower in sec["title"].lower():
+            return sec["body"]
+    return ""
 
 
-def _build_table_from_lines(lines):
-    rows = []
-    for line in lines:
-        if not line.strip():
-            continue
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if all(set(c.replace("-", "").replace(":", "").replace(" ", "")) == set() for c in cells):
-            continue  # separator row
-        rows.append(cells)
-    if len(rows) < 2:
+def _render_narrative_body(body, styles, story):
+    """Render a narrative section body (bullets and paragraphs) into the story."""
+    for line in body.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            story.append(Spacer(1, 2*mm))
+        elif stripped.startswith("- ") or stripped.startswith("* "):
+            txt = stripped[2:].replace("**", "")
+            if txt.startswith("*") and txt.endswith("*"):
+                # Italicized CTA line
+                story.append(Spacer(1, 3*mm))
+                story.append(Paragraph(f"<i>{txt.strip('*')}</i>", styles["cta"]))
+            else:
+                story.append(Paragraph(f"•&nbsp;&nbsp;{txt}", styles["bullet"]))
+        elif stripped.startswith("*") and stripped.endswith("*"):
+            # Standalone italicized CTA
+            story.append(Spacer(1, 3*mm))
+            story.append(Paragraph(f"<i>{stripped.strip('*')}</i>", styles["cta"]))
+        else:
+            txt = stripped.replace("**", "")
+            story.append(Paragraph(txt, styles["body"]))
+
+
+def _build_results_table(comparison_data, styles):
+    """Build the Section 4 detailed benchmarking results table from structured data."""
+    if not comparison_data or "items" not in comparison_data:
         return None
 
-    col_count = max(len(r) for r in rows)
-    # Normalise row lengths
-    rows = [r + [""] * (col_count - len(r)) for r in rows]
+    items = [i for i in comparison_data["items"] if i.get("has_sufficient_peers")]
+    if not items:
+        return None
 
-    col_width = (A4[0] - 40*mm) / col_count
-    table = Table(rows, colWidths=[col_width] * col_count, repeatRows=1)
-    style = TableStyle([
-        ("BACKGROUND",  (0, 0), (-1, 0), NAVY),
-        ("TEXTCOLOR",   (0, 0), (-1, 0), WHITE),
-        ("FONTNAME",    (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE",    (0, 0), (-1, 0), 8),
-        ("BACKGROUND",  (0, 1), (-1, -1), WHITE),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, SLATE_LIGHT]),
-        ("FONTNAME",    (0, 1), (-1, -1), "Helvetica"),
-        ("FONTSIZE",    (0, 1), (-1, -1), 8),
-        ("TEXTCOLOR",   (0, 1), (-1, -1), BLACK),
-        ("GRID",        (0, 0), (-1, -1), 0.4, SLATE_MID),
-        ("TOPPADDING",  (0, 0), (-1, -1), 5),
+    cell_style = ParagraphStyle("cell", fontName="Helvetica", fontSize=8,
+                                leading=10, textColor=BLACK)
+    cell_bold = ParagraphStyle("cell_bold", fontName="Helvetica-Bold", fontSize=8,
+                               leading=10, textColor=BLACK)
+    header_style = ParagraphStyle("hdr", fontName="Helvetica-Bold", fontSize=8,
+                                  leading=10, textColor=WHITE, alignment=TA_CENTER)
+
+    headers = [
+        Paragraph("SKU", header_style),
+        Paragraph("Quantity", header_style),
+        Paragraph("Unit Price<br/>(USD)", header_style),
+        Paragraph("Peer<br/>Median", header_style),
+        Paragraph("Peer<br/>Range", header_style),
+        Paragraph("Variance", header_style),
+        Paragraph("Recommendation", header_style),
+    ]
+
+    rows = [headers]
+
+    total_user_spend = 0
+    total_peer_median_spend = 0
+    total_peer_low = 0
+    total_peer_high = 0
+    highest_var_sku = ""
+    highest_var = 0
+
+    for item in items:
+        user_cost = item.get("user_unit_cost_annual", 0)
+        peer_med = item.get("peer_median", 0)
+        peer_p25 = item.get("peer_p25", 0)
+        peer_p75 = item.get("peer_p75", 0)
+        qty = item.get("user_quantity", 1)
+        variance = _compute_variance_pct(user_cost, peer_med)
+
+        total_user_spend += item.get("user_total_annual", user_cost * qty)
+        total_peer_median_spend += peer_med * qty
+        total_peer_low += peer_p25 * qty
+        total_peer_high += peer_p75 * qty
+
+        if abs(variance) > abs(highest_var):
+            highest_var = variance
+            highest_var_sku = item.get("product_name", "")
+
+        peer_range = f"{_fmt_number(peer_p25)}–{_fmt_number(peer_p75)}"
+
+        row = [
+            Paragraph(item.get("product_name", ""), cell_style),
+            Paragraph(str(int(qty)), cell_style),
+            Paragraph(_fmt_number(user_cost), cell_style),
+            Paragraph(_fmt_number(peer_med), cell_style),
+            Paragraph(peer_range, cell_style),
+            Paragraph(_fmt_variance(variance), cell_style),
+            Paragraph(_derive_recommendation(item), cell_style),
+        ]
+        rows.append(row)
+
+    # Total row
+    total_var = _compute_variance_pct(total_user_spend, total_peer_median_spend)
+    opt_hint = f"optimize {highest_var_sku[:20]}" if highest_var_sku else "review pricing"
+    total_row = [
+        Paragraph("Total Spend", cell_bold),
+        Paragraph("-", cell_style),
+        Paragraph(_fmt_number(total_user_spend), cell_bold),
+        Paragraph(_fmt_number(total_peer_median_spend), cell_bold),
+        Paragraph(f"{_fmt_number(total_peer_low)}–{_fmt_number(total_peer_high)}", cell_style),
+        Paragraph(_fmt_variance(total_var), cell_bold),
+        Paragraph(f"Renegotiate contract; {opt_hint}", cell_style),
+    ]
+    rows.append(total_row)
+
+    usable_w = PAGE_W - 40*mm
+    col_widths = [
+        usable_w * 0.25,  # SKU
+        usable_w * 0.08,  # Qty
+        usable_w * 0.13,  # Unit Price
+        usable_w * 0.13,  # Peer Median
+        usable_w * 0.15,  # Peer Range
+        usable_w * 0.10,  # Variance
+        usable_w * 0.16,  # Recommendation
+    ]
+
+    table = Table(rows, colWidths=col_widths, repeatRows=1)
+    last_data_row = len(rows) - 2  # row before total
+    total_row_idx = len(rows) - 1
+
+    style_cmds = [
+        ("BACKGROUND",    (0, 0), (-1, 0), NAVY),
+        ("TEXTCOLOR",     (0, 0), (-1, 0), WHITE),
+        ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 0), (-1, 0), 8),
+        ("BACKGROUND",    (0, 1), (-1, last_data_row), WHITE),
+        ("ROWBACKGROUNDS",(0, 1), (-1, last_data_row), [WHITE, SLATE_LIGHT]),
+        ("FONTNAME",      (0, 1), (-1, last_data_row), "Helvetica"),
+        ("FONTSIZE",      (0, 1), (-1, -1), 8),
+        ("TEXTCOLOR",     (0, 1), (-1, -1), BLACK),
+        # Total row styling
+        ("BACKGROUND",    (0, total_row_idx), (-1, total_row_idx), BLUE_LIGHT),
+        ("FONTNAME",      (0, total_row_idx), (0, total_row_idx), "Helvetica-Bold"),
+        # Grid
+        ("GRID",          (0, 0), (-1, -1), 0.4, SLATE_MID),
+        ("TOPPADDING",    (0, 0), (-1, -1), 5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("VALIGN",      (0, 0), (-1, -1), "MIDDLE"),
-    ])
-    table.setStyle(style)
+        ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+    ]
+    table.setStyle(TableStyle(style_cmds))
     return table
 
 
-def generate_pdf_report(report, org, benchmark_result, analysis_text) -> bytes:
+def _revenue_band_label(revenue_band):
+    mapping = {
+        "under_1m": "under $1M",
+        "1m_10m": "$1–10M",
+        "10m_100m": "$10–100M",
+        "100m_500m": "$100–500M",
+        "500m_1b": "$500M–1B",
+        "over_1b": "over $1B",
+    }
+    return mapping.get(revenue_band, revenue_band or "N/A")
+
+
+def _size_band_label(size_band):
+    mapping = {
+        "1-50": "1–50 employees",
+        "51-200": "51–200 employees",
+        "201-1000": "201–1,000 employees",
+        "1001-5000": "1,001–5,000 employees",
+        "5001+": "5,001+ employees",
+    }
+    return mapping.get(size_band, size_band or "N/A")
+
+
+# ── Main PDF generator ─────────────────────────────────────────────────────
+
+def generate_pdf_report(report, org, benchmark_result, analysis_text,
+                        comparison_data=None, contract_term=None) -> bytes:
     """
-    Generate a professional PDF benchmarking report.
+    Generate a professional PDF benchmarking report matching the 7-section layout.
     Returns raw PDF bytes.
     """
     buf = io.BytesIO()
@@ -164,215 +338,163 @@ def generate_pdf_report(report, org, benchmark_result, analysis_text) -> bytes:
     doc.addPageTemplates([template])
 
     # ── Styles ──────────────────────────────────────────────────────────────
-    base = getSampleStyleSheet()
-
-    def style(name, **kw):
-        return ParagraphStyle(name, **kw)
-
     S = {
-        "cover_title": style("cover_title",
-            fontName="Helvetica-Bold", fontSize=28, textColor=WHITE,
-            leading=34, spaceAfter=6),
-        "cover_sub": style("cover_sub",
-            fontName="Helvetica", fontSize=13, textColor=colors.HexColor("#93c5fd"),
-            leading=18, spaceAfter=4),
-        "cover_meta": style("cover_meta",
-            fontName="Helvetica", fontSize=9, textColor=colors.HexColor("#cbd5e1"),
-            leading=14),
-        "section_title": style("section_title",
-            fontName="Helvetica-Bold", fontSize=13, textColor=NAVY,
-            spaceBefore=14, spaceAfter=6, borderPad=0,
-            leftIndent=0),
-        "body": style("body",
-            fontName="Helvetica", fontSize=9, textColor=BLACK,
+        "report_title": ParagraphStyle("report_title",
+            fontName="Helvetica-Bold", fontSize=24, textColor=NAVY,
+            leading=30, spaceAfter=16),
+        "section_header": ParagraphStyle("section_header",
+            fontName="Helvetica-Bold", fontSize=14, textColor=NAVY,
+            spaceBefore=16, spaceAfter=6),
+        "kv_line": ParagraphStyle("kv_line",
+            fontName="Helvetica", fontSize=10, textColor=BLACK,
+            leading=16, spaceAfter=2),
+        "body": ParagraphStyle("body",
+            fontName="Helvetica", fontSize=9.5, textColor=BLACK,
             leading=14, spaceAfter=4, alignment=TA_JUSTIFY),
-        "bullet": style("bullet",
-            fontName="Helvetica", fontSize=9, textColor=BLACK,
-            leading=13, spaceAfter=3, leftIndent=12, bulletIndent=0),
-        "small": style("small",
+        "bullet": ParagraphStyle("bullet",
+            fontName="Helvetica", fontSize=9.5, textColor=BLACK,
+            leading=14, spaceAfter=6, leftIndent=18, bulletIndent=0),
+        "cta": ParagraphStyle("cta",
+            fontName="Helvetica-Oblique", fontSize=9, textColor=SLATE,
+            leading=13, spaceAfter=4, spaceBefore=6),
+        "small": ParagraphStyle("small",
             fontName="Helvetica", fontSize=8, textColor=SLATE,
             leading=12, spaceAfter=2),
-        "label": style("label",
-            fontName="Helvetica-Bold", fontSize=8, textColor=SLATE,
-            leading=11, spaceAfter=1),
-        "metric_val": style("metric_val",
-            fontName="Helvetica-Bold", fontSize=22, textColor=NAVY,
-            leading=26, spaceAfter=0),
-        "metric_label": style("metric_label",
-            fontName="Helvetica", fontSize=8, textColor=SLATE,
-            leading=10),
-        "tag": style("tag",
-            fontName="Helvetica-Bold", fontSize=7.5, textColor=WHITE,
-            leading=10),
     }
 
     story = []
+    vendor_name = report.get("category", "SaaS")
+    org_name = org.get("name", "Organisation")
+    org_industry = org.get("industry", "N/A")
+    org_size = org.get("size", 0)
+    org_revenue = org.get("revenue", 0)
 
-    # ── COVER PAGE ──────────────────────────────────────────────────────────
-    # Full-bleed navy cover block via a tall table
-    cover_data = [[""]]
-    cover_table = Table(cover_data, colWidths=[doc.width], rowHeights=[80*mm])
-    cover_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), NAVY_DARK),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
-    story.append(cover_table)
-    story.append(Spacer(1, -80*mm))  # overlap
+    summary = comparison_data.get("summary", {}) if comparison_data else {}
+    total_spend = summary.get("total_annual_spend", benchmark_result.get("total_spend", 0))
 
-    # Text over the cover block
-    story.append(Spacer(1, 10*mm))
-    story.append(Paragraph("SaaS Cost Benchmarking", S["cover_sub"]))
-    story.append(Paragraph(
-        f"{org.get('name', 'Organisation')} — Cost Intelligence Report",
-        S["cover_title"]
-    ))
-    story.append(Paragraph(
-        f"Industry: {org.get('domain', 'N/A')}  &nbsp;|&nbsp;  "
-        f"Employees: {org.get('size', 'N/A')}  &nbsp;|&nbsp;  "
-        f"Revenue: {_fmt_currency(org.get('revenue'))}",
-        S["cover_meta"]
-    ))
-    story.append(Paragraph(
-        f"Report generated: {datetime.now().strftime('%d %B %Y')}  &nbsp;|&nbsp;  "
-        f"File: {report.get('filename', 'N/A')}  &nbsp;|&nbsp;  "
-        f"Category: {report.get('category', 'N/A')}",
-        S["cover_meta"]
-    ))
-    story.append(Spacer(1, 8*mm))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#1e3a5f")))
+    # Parse AI narrative sections
+    sections = _parse_benchmark_sections(analysis_text) if analysis_text else []
+
+    # ── TITLE ───────────────────────────────────────────────────────────────
+    title_text = f"{vendor_name} Benchmarking Report –<br/>{org_name}"
+    story.append(Paragraph(title_text, S["report_title"]))
     story.append(Spacer(1, 4*mm))
 
-    # ── KEY METRICS STRIP ───────────────────────────────────────────────────
-    total_spend       = benchmark_result.get("total_spend")
-    spend_per_emp     = benchmark_result.get("spend_per_employee")
-    spend_pct_rev     = benchmark_result.get("spend_pct_revenue")
-    peer_count        = benchmark_result.get("peer_count", 0)
-    generated_at      = benchmark_result.get("generated_at", "")
+    # ── SECTION 1: Benchmarking Overview ────────────────────────────────────
+    story.append(Paragraph("1. Benchmarking Overview", S["section_header"]))
+    story.append(HRFlowable(width="100%", thickness=1, color=SLATE_MID, spaceAfter=8))
 
-    def metric_cell(val, label, bg=BLUE_LIGHT):
-        return [
-            Paragraph(val, ParagraphStyle("mv", fontName="Helvetica-Bold",
-                fontSize=20, textColor=NAVY, leading=24, alignment=TA_CENTER)),
-            Spacer(1, 2),
-            Paragraph(label, ParagraphStyle("ml", fontName="Helvetica",
-                fontSize=8, textColor=SLATE, leading=10, alignment=TA_CENTER)),
-        ]
+    scope = vendor_name
+    if comparison_data and "items" in comparison_data:
+        product_names = list({i.get("product_name", "") for i in comparison_data["items"] if i.get("product_name")})
+        if len(product_names) == 1:
+            scope = f"{vendor_name} — {product_names[0]}"
+        elif len(product_names) > 1:
+            scope = f"{vendor_name} + Add-ons"
 
-    metrics_table = Table(
-        [[
-            metric_cell(_fmt_currency(total_spend), "Total SaaS Spend"),
-            metric_cell(_fmt_currency(spend_per_emp), "Per Employee"),
-            metric_cell(_fmt_pct(spend_pct_rev), "% of Revenue"),
-            metric_cell(str(peer_count), "Peer Orgs Compared"),
-        ]],
-        colWidths=[doc.width / 4] * 4,
-        rowHeights=[22*mm],
-    )
-    metrics_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), BLUE_LIGHT),
-        ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#ede9fe")),
-        ("BACKGROUND", (2, 0), (2, 0), colors.HexColor("#dcfce7")),
-        ("BACKGROUND", (3, 0), (3, 0), colors.HexColor("#fef9c3")),
-        ("BOX",        (0, 0), (-1, -1), 0.5, SLATE_MID),
-        ("INNERGRID",  (0, 0), (-1, -1), 0.5, SLATE_MID),
-        ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]))
-    story.append(metrics_table)
-    story.append(Spacer(1, 3*mm))
+    kv_pairs = [
+        ("Client", f"{org_name} ({org_industry})" if org_industry != "N/A" else org_name),
+        ("Employees", f"{org_size:,}" if org_size else "N/A"),
+        ("Revenue", _fmt_currency(org_revenue) if org_revenue else "N/A"),
+        ("Scope", scope),
+        ("Contract Term", contract_term or "N/A"),
+        ("Total Spend", f"USD {total_spend:,.0f}" if total_spend else "N/A"),
+    ]
+    for label, value in kv_pairs:
+        story.append(Paragraph(f"<b>{label}:</b> {value}", S["kv_line"]))
+    story.append(Spacer(1, 4*mm))
 
-    # Data source note
-    if peer_count > 0:
-        source_text = (f"Benchmarks based on <b>{peer_count} peer organisation(s)</b> "
-                       f"from the SaaSCostCompare panel with similar revenue and headcount.")
+    # ── SECTION 2: Executive Summary ────────────────────────────────────────
+    story.append(Paragraph("2. Executive Summary", S["section_header"]))
+    story.append(HRFlowable(width="100%", thickness=1, color=SLATE_MID, spaceAfter=8))
+
+    exec_body = _get_section_body(sections, "Executive Summary")
+    if exec_body:
+        _render_narrative_body(exec_body, S, story)
     else:
-        source_text = ("No peer organisations with matching revenue/size found in the current panel. "
-                       "Benchmarks are based on AI-derived industry knowledge.")
-    story.append(Paragraph(source_text, S["small"]))
+        story.append(Paragraph("Executive summary not available.", S["body"]))
+    story.append(Spacer(1, 4*mm))
+
+    # ── SECTION 3: Details of Benchmarking Dataset ──────────────────────────
+    story.append(Paragraph("3. Details of Benchmarking Dataset", S["section_header"]))
+    story.append(HRFlowable(width="100%", thickness=1, color=SLATE_MID, spaceAfter=8))
+
+    # Derive peer group description
+    size_label = _size_band_label(org.get("size_band"))
+    rev_label = _revenue_band_label(org.get("revenue_band"))
+    industry_label = org_industry if org_industry != "N/A" else "cross-industry"
+    peer_group = f"{industry_label}-sector organizations ({size_label}, {rev_label} revenue)"
+
+    # Count peer orgs from comparison data
+    peer_org_count = 0
+    if comparison_data and "items" in comparison_data:
+        peer_counts = [i.get("peer_org_count", 0) for i in comparison_data["items"] if i.get("has_sufficient_peers")]
+        peer_org_count = max(peer_counts) if peer_counts else 0
+
+    dataset_pairs = [
+        ("Peer Group", peer_group),
+        ("Number of Peer Organizations", str(peer_org_count) if peer_org_count else "N/A"),
+        ("Data Age", "Less than 12 months old"),
+        ("Regions", "North America (US + Canada)"),
+    ]
+    for label, value in dataset_pairs:
+        story.append(Paragraph(f"<b>{label}:</b> {value}", S["kv_line"]))
+    story.append(Spacer(1, 4*mm))
+
+    # ── SECTION 4: Detailed Benchmarking Results ────────────────────────────
+    story.append(Paragraph("4. Detailed Benchmarking Results", S["section_header"]))
+    story.append(HRFlowable(width="100%", thickness=1, color=SLATE_MID, spaceAfter=8))
+
+    results_table = _build_results_table(comparison_data, S)
+    if results_table:
+        story.append(results_table)
+    else:
+        story.append(Paragraph(
+            "Detailed comparison data not available. Ensure the peer comparison has been run.",
+            S["body"]))
+    story.append(Spacer(1, 4*mm))
+
+    # ── SECTION 5: Aggregated Fee Benchmarks ────────────────────────────────
+    story.append(Paragraph("5. Aggregated Fee Benchmarks", S["section_header"]))
+    story.append(HRFlowable(width="100%", thickness=1, color=SLATE_MID, spaceAfter=8))
+
+    agg_body = _get_section_body(sections, "Aggregated Fee Benchmarks")
+    if agg_body:
+        _render_narrative_body(agg_body, S, story)
+    else:
+        story.append(Paragraph("Aggregated benchmarks not available.", S["body"]))
+    story.append(Spacer(1, 4*mm))
+
+    # ── SECTION 6: Additional Levers for Optimization ───────────────────────
+    story.append(Paragraph("6. Additional Levers for Optimization", S["section_header"]))
+    story.append(HRFlowable(width="100%", thickness=1, color=SLATE_MID, spaceAfter=8))
+
+    opt_body = _get_section_body(sections, "Additional Levers")
+    if opt_body:
+        _render_narrative_body(opt_body, S, story)
+    else:
+        story.append(Paragraph("Optimization levers not available.", S["body"]))
+    story.append(Spacer(1, 4*mm))
+
+    # ── SECTION 7: Negotiation Insights ─────────────────────────────────────
+    story.append(Paragraph("7. Negotiation Insights", S["section_header"]))
+    story.append(HRFlowable(width="100%", thickness=1, color=SLATE_MID, spaceAfter=8))
+
+    neg_body = _get_section_body(sections, "Negotiation Insights")
+    if neg_body:
+        _render_narrative_body(neg_body, S, story)
+    else:
+        story.append(Paragraph("Negotiation insights not available.", S["body"]))
     story.append(Spacer(1, 6*mm))
 
-    # ── BENCHMARK REPORT SECTIONS ───────────────────────────────────────────
-    bm_text = benchmark_result.get("report", "")
-    sections = _parse_benchmark_sections(bm_text)
-
-    for sec in sections:
-        story.append(HRFlowable(width="100%", thickness=1, color=BLUE_LIGHT, spaceAfter=4))
-        story.append(Paragraph(sec["title"], S["section_title"]))
-
-        lines = sec["body"].split("\n")
-        i = 0
-        table_lines = []
-        while i < len(lines):
-            line = lines[i]
-            if _is_table_line(line):
-                table_lines.append(line)
-                i += 1
-                continue
-            else:
-                # flush any buffered table
-                if table_lines:
-                    tbl = _build_table_from_lines(table_lines)
-                    if tbl:
-                        story.append(Spacer(1, 2*mm))
-                        story.append(tbl)
-                        story.append(Spacer(1, 3*mm))
-                    table_lines = []
-
-                stripped = line.strip()
-                if not stripped:
-                    story.append(Spacer(1, 2*mm))
-                elif stripped.startswith("- ") or stripped.startswith("* "):
-                    # Remove bold markers
-                    txt = stripped[2:].replace("**", "")
-                    story.append(Paragraph(f"• &nbsp; {txt}", S["bullet"]))
-                elif stripped[:2].isdigit() and stripped[1] in ".)" or \
-                        stripped[:1].isdigit() and len(stripped) > 1 and stripped[1] in ".)":
-                    txt = stripped.split(".", 1)[-1].strip().replace("**", "")
-                    story.append(Paragraph(f"{stripped[0]}. &nbsp; {txt}", S["bullet"]))
-                else:
-                    txt = stripped.replace("**", "")
-                    story.append(Paragraph(txt, S["body"]))
-                i += 1
-
-        # flush remaining table
-        if table_lines:
-            tbl = _build_table_from_lines(table_lines)
-            if tbl:
-                story.append(Spacer(1, 2*mm))
-                story.append(tbl)
-                story.append(Spacer(1, 3*mm))
-
-    # ── AI ANALYSIS SECTION ─────────────────────────────────────────────────
-    if analysis_text:
-        story.append(PageBreak())
-        story.append(HRFlowable(width="100%", thickness=1, color=BLUE_LIGHT, spaceAfter=4))
-        story.append(Paragraph("AI Cost Analysis", S["section_title"]))
-        story.append(Paragraph(
-            "The following analysis was generated by the SaaSCostCompare AI engine upon processing "
-            "the uploaded expense report.",
-            S["small"]
-        ))
-        story.append(Spacer(1, 3*mm))
-        for line in analysis_text.split("\n"):
-            stripped = line.strip()
-            if not stripped:
-                story.append(Spacer(1, 2*mm))
-            elif stripped.startswith("- ") or stripped.startswith("* "):
-                story.append(Paragraph(f"• &nbsp; {stripped[2:].replace('**','')}", S["bullet"]))
-            else:
-                story.append(Paragraph(stripped.replace("**", ""), S["body"]))
-
     # ── DISCLAIMER ──────────────────────────────────────────────────────────
-    story.append(Spacer(1, 8*mm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=SLATE_MID))
     story.append(Spacer(1, 3*mm))
     story.append(Paragraph(
         "<b>Disclaimer:</b> This report is prepared by SaaSCostCompare for the exclusive use of the "
-        "commissioning organisation. Benchmark figures are indicative and based on anonymised peer data "
-        "and/or AI-derived industry knowledge. SaaSCostCompare provides no warranty as to the accuracy "
-        "of vendor pricing. This document is confidential and must not be shared with vendors.",
+        "commissioning organisation. Benchmark figures are indicative and based on anonymised peer data. "
+        "SaaSCostCompare provides no warranty as to the accuracy of vendor pricing. "
+        "This document is confidential and must not be shared with vendors.",
         S["small"]
     ))
 

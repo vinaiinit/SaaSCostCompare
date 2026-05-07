@@ -19,6 +19,7 @@ from models import (
     User, Organization, Report, BenchmarkReport, PasswordResetToken,
     ContactInquiry, ContractLineItem, VendorCatalog, DataCoverageStats,
     CampaignSubmission, LicenseAnalysis, AuditLog, Subscription,
+    PriceList, ListPrice,
 )
 from auth import hash_password, verify_password, create_access_token, verify_token
 from audit import log_event
@@ -558,6 +559,66 @@ def renormalize_all_line_items(
     }
 
 
+# --- List price import ---
+@app.post("/admin/import-list-prices")
+def import_list_prices_endpoint(
+    file: UploadFile = File(...),
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx) are supported")
+
+    upload_dir = os.path.join("uploads", "list_prices")
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, f"{uuid.uuid4()}_{file.filename}")
+
+    with open(file_path, "wb") as f:
+        f.write(file.file.read())
+
+    from list_price_import import import_list_prices
+    result = import_list_prices(file_path, file.filename, db, uploaded_by=user_id)
+    return result
+
+
+@app.get("/admin/list-prices/{vendor_name}")
+def get_list_prices(
+    vendor_name: str,
+    user_id: int = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    price_list = db.query(PriceList).filter(
+        PriceList.vendor_name == vendor_name,
+        PriceList.is_active == True,
+    ).first()
+
+    if not price_list:
+        return {"error": f"No active price list for {vendor_name}", "items": []}
+
+    items = db.query(ListPrice).filter(
+        ListPrice.price_list_id == price_list.id,
+    ).order_by(ListPrice.product_name_canonical, ListPrice.list_price_annual_usd.desc()).all()
+
+    return {
+        "price_list_id": price_list.id,
+        "vendor_name": price_list.vendor_name,
+        "effective_date": str(price_list.effective_date) if price_list.effective_date else None,
+        "total_rows": len(items),
+        "items": [
+            {
+                "id": lp.id,
+                "product_name_raw": lp.product_name_raw,
+                "product_name_canonical": lp.product_name_canonical,
+                "manufacturer_part_number": lp.manufacturer_part_number,
+                "list_price_usd": lp.list_price_usd,
+                "list_price_annual_usd": lp.list_price_annual_usd,
+                "duration_years": lp.duration_years,
+            }
+            for lp in items
+        ],
+    }
+
+
 # --- Feasibility check ---
 @app.post("/uploads/{upload_id}/feasibility")
 def check_feasibility(
@@ -997,11 +1058,30 @@ def download_full_report(
         except Exception:
             pass
 
+    # Compute contract term from line item dates
+    contract_term = "N/A"
+    line_items = db.query(ContractLineItem).filter(
+        ContractLineItem.upload_id == report_id
+    ).all()
+    start_dates = [li.contract_start_date for li in line_items if li.contract_start_date]
+    end_dates = [li.contract_end_date for li in line_items if li.contract_end_date]
+    if start_dates and end_dates:
+        earliest = min(start_dates)
+        latest = max(end_dates)
+        if latest > earliest:
+            months = (latest.year - earliest.year) * 12 + (latest.month - earliest.month)
+            if latest.day > earliest.day:
+                months += 1
+            if months > 0:
+                contract_term = f"{months} months" if months != 1 else "1 month"
+
     org_profile = {
         "name": org.name if org else "N/A",
         "industry": org.industry if org else "N/A",
         "revenue": org.revenue if org else 0,
         "size": org.size if org else 0,
+        "size_band": org.size_band if org else "N/A",
+        "revenue_band": org.revenue_band if org else "N/A",
     }
     report_meta = {
         "filename": report.filename,
@@ -1009,11 +1089,14 @@ def download_full_report(
         "created_at": str(report.created_at),
     }
 
-    # Pass narrative text as analysis_text for PDF generation
     analysis_text = bm_result.get("narrative", "")
 
-    pdf_bytes = generate_pdf_report(report_meta, org_profile, bm_result, analysis_text)
-    filename = f"SaaSCostCompare_{org_profile['name'].replace(' ', '_')}_Report.pdf"
+    pdf_bytes = generate_pdf_report(
+        report_meta, org_profile, bm_result, analysis_text,
+        comparison_data=comparison_data, contract_term=contract_term,
+    )
+    vendor = report_meta.get("category", "SaaS")
+    filename = f"{vendor}_Benchmarking_Report_{org_profile['name'].replace(' ', '_')}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

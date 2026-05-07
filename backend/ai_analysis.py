@@ -27,29 +27,42 @@ def generate_narrative(comparison_data: dict, org_profile: dict) -> dict:
     items = comparison_data.get("items", [])
     summary = comparison_data.get("summary", {})
 
-    prompt = f"""You are a professional report writer for a SaaS cost benchmarking platform.
+    org_name = org_profile.get('name', 'N/A')
+    org_industry = org_profile.get('industry', 'N/A')
+    org_size = org_profile.get('size', 0)
+    org_revenue = org_profile.get('revenue', 0)
+    vendor_name = summary.get('org_name', org_name)
+    total_spend = summary.get('total_annual_spend', 0)
+    cost_per_employee = round(total_spend / org_size, 0) if org_size else 0
+
+    prompt = f"""You are a professional report writer for a SaaS cost benchmarking platform called SaaSCostCompare.
 
 Given the STRUCTURED COMPARISON DATA below (already computed from real peer contract data),
-write a clear, professional narrative report.
+write narrative sections for a benchmarking report.
 
 CRITICAL RULES:
 - Do NOT perform any additional analysis or generate any numbers not in the data below.
 - Use the EXACT dollar amounts, percentiles, and assessments from the data.
 - Do NOT invent, estimate, or extrapolate any figures.
 - Do NOT name any research firms, reports, or external sources.
-- Present the data in a customer-friendly, actionable format.
+- Do NOT produce markdown tables or numbered section prefixes (no "1.", "2." etc. before section titles).
+- Do NOT produce sections called "Peer Comparison Results" or "Items With Limited Data" — those are handled separately.
+- Write each bullet point as a substantive paragraph (3-4 sentences), not a single sentence.
+- Refer to the client as "{org_name}" throughout.
 
 ORGANIZATION PROFILE:
-- Name: {org_profile.get('name', 'N/A')}
-- Industry: {org_profile.get('industry', 'N/A')}
-- Company Size: {org_profile.get('size_band', 'N/A')}
+- Client Name: {org_name}
+- Industry: {org_industry}
+- Employees: {org_size:,}
+- Revenue: ${org_revenue:,.0f}
+- Cost per Employee: ${cost_per_employee:,.0f}
 
 COMPARISON SUMMARY:
 - Total line items analyzed: {summary.get('total_items', 0)}
 - Items with sufficient peer data: {summary.get('benchmarkable_items', 0)}
 - Items with insufficient data: {summary.get('insufficient_data_items', 0)}
 - Data coverage: {summary.get('coverage_pct', 0)}%
-- Total annual spend (uploaded data): ${summary.get('total_annual_spend', 0):,.2f}
+- Total annual spend: ${total_spend:,.2f}
 - Items above market: {summary.get('spend_above_market', 0)}
 - Total potential savings: ${summary.get('total_potential_savings', 0):,.2f}
 
@@ -59,37 +72,40 @@ ASSESSMENT BREAKDOWN:
 DETAILED ITEM COMPARISONS:
 {json.dumps(items, indent=2)}
 
-Write the report with these EXACT sections:
+Write the report with these EXACT four sections (use ## headings exactly as shown):
 
 ## Executive Summary
-2-3 sentences summarizing the overall position using the data above. State the coverage percentage,
-how many items are above/below market, and the total potential savings figure.
+Exactly 3 bullet points (use "- " prefix for each):
+1. State {org_name}'s overall spend relative to the peer median as a percentage (e.g., "approximately X% above the peer median"). Explain what this means for the organization's cost position.
+2. Identify the single highest-variance SKU by name. Explain why it is an outlier and what specific action could reduce costs.
+3. Identify a moderate-variance area. Explain the opportunity to optimize and how proactive adjustments can help.
 
-## Peer Comparison Results
-For each item that has sufficient peers, present:
-- Product name and the user's annual cost
-- Peer median and percentile position (use exact numbers from the data)
-- Assessment (well below / below / at / above market)
-- Potential savings if above market
+## Aggregated Fee Benchmarks
+Exactly 3 bullet points (use "- " prefix for each):
+1. Compare total annual spend (USD {total_spend:,.0f}) against a computed peer median total. State the variance amount.
+2. Compare cost per employee (USD {cost_per_employee:,.0f}) against a peer median cost per employee. Note what this indicates about ROI.
+3. Provide a module/category breakdown by spend percentage (e.g., "CRM accounting for X% of spend, Sandbox Y%, Analytics Z%"). Comment on whether the distribution is typical.
 
-## Items With Limited Data
-List any items where peer data was insufficient. Explain that as more organizations
-contribute data, these items will become benchmarkable.
+## Additional Levers for Optimization
+Exactly 3 bullet points (use "- " prefix for each) with specific, actionable strategies based on the data above. Each should reference specific SKUs or categories and explain the rationale.
+After the bullets, add this exact line:
+*For a deeper exploration of tailored optimization strategies beyond pricing, please contact us at advisory@saascostcompare.com to arrange a bespoke consulting engagement.*
 
-## Key Findings
-3-5 bullet points drawn directly from the data. Use specific dollar amounts.
-
-## Recommendations
-Prioritized actions based on which items are above market, ordered by potential savings.
+## Negotiation Insights
+Exactly 3 bullet points (use "- " prefix for each):
+1. How renewal timing can be leveraged for better terms.
+2. What discount ranges are typical among peers in this sector.
+3. What target pricing should be for the highest-cost SKU to align with peer medians.
+After the bullets, add this exact line:
+*Need help turning these insights into a signed contract? SaaSCostCompare offers end-to-end negotiation support to right-size your stack and secure these target rates on your behalf. To discuss a dedicated advisory engagement, reach out to advisory@saascostcompare.com*
 
 Use specific dollar amounts and percentages throughout. Be direct and actionable.
-Do NOT use markdown table separator lines (|---|).
 """
 
     try:
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=2048,
+            max_tokens=3000,
             messages=[{"role": "user", "content": prompt}],
         )
         return {
