@@ -196,6 +196,93 @@ def extract_from_csv(file_path: str, upload_id: str, org_id: int, db: Session) -
     return items
 
 
+def extract_from_excel(file_path: str, upload_id: str, org_id: int, db: Session) -> list[ContractLineItem]:
+    """Parse Excel rows into ContractLineItem objects. Tries structured columns first, falls back to AI extraction."""
+    import openpyxl
+
+    items = []
+    try:
+        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+        ws = wb.active
+
+        rows_iter = ws.iter_rows(values_only=True)
+        header_row = next(rows_iter, None)
+        if not header_row:
+            wb.close()
+            return []
+
+        headers = [str(h).strip().lower() if h else "" for h in header_row]
+
+        # Check if this looks like a structured contract file with expected columns
+        expected = {"vendor", "product_name", "unit_price", "total_cost", "quantity"}
+        found = set(headers) & expected
+        has_structure = len(found) >= 2
+
+        if has_structure:
+            for row in rows_iter:
+                norm = {headers[i]: row[i] for i in range(min(len(headers), len(row)))}
+
+                raw_vendor = str(norm.get("vendor", "") or "").strip()
+                raw_product = str(norm.get("product_name", "") or "").strip()
+                if not raw_vendor and not raw_product:
+                    continue
+
+                vendor, product = normalize_line_item(raw_vendor, raw_product, db)
+
+                unit_price = _parse_float(norm.get("unit_price"))
+                total_cost = _parse_float(norm.get("total_cost"))
+                quantity = _parse_int(norm.get("quantity")) or 1
+                billing_freq = _normalize_billing_frequency(str(norm.get("billing_frequency", "") or ""))
+                start_date = _parse_date(norm.get("contract_start_date"))
+                end_date = _parse_date(norm.get("contract_end_date"))
+                currency = str(norm.get("currency", "USD") or "USD").strip().upper() or "USD"
+
+                cost_per_unit_annual, total_cost_annual = compute_annual_costs(
+                    unit_price, total_cost, billing_freq, start_date, end_date
+                )
+
+                item = ContractLineItem(
+                    upload_id=upload_id,
+                    org_id=org_id,
+                    vendor_name=vendor,
+                    product_name=product,
+                    sku=str(norm.get("sku", "") or "").strip() or None,
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    total_cost=total_cost,
+                    billing_frequency=billing_freq,
+                    currency=currency,
+                    contract_start_date=start_date,
+                    contract_end_date=end_date,
+                    cost_per_unit_annual=cost_per_unit_annual,
+                    total_cost_annual=total_cost_annual,
+                    extraction_source="excel",
+                    extraction_confidence=1.0,
+                )
+                items.append(item)
+            wb.close()
+        else:
+            # No structured columns — convert Excel content to text and use AI extraction
+            wb.close()
+            text_lines = []
+            wb2 = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            for sheet in wb2.sheetnames:
+                ws2 = wb2[sheet]
+                for row in ws2.iter_rows(values_only=True):
+                    line = "\t".join(str(c) if c is not None else "" for c in row)
+                    if line.strip():
+                        text_lines.append(line)
+            wb2.close()
+
+            if text_lines:
+                text = "\n".join(text_lines)
+                items = _ai_extract_line_items(text, upload_id, org_id, db)
+
+    except Exception as e:
+        print(f"Error extracting Excel {file_path}: {e}")
+    return items
+
+
 # ── Page scoring & chunking for large PDFs ─────────────────────────────────
 
 _PRICING_KEYWORDS = [
@@ -821,6 +908,11 @@ def run_extraction(upload_id: str, file_path: str, org_id: int, db: Session) -> 
                 all_items.extend(items)
                 all_warnings.extend(warnings)
                 file_names.append(f"{basename} (PDF, {len(items)} items extracted)")
+
+            elif lower.endswith((".xlsx", ".xls")):
+                items = extract_from_excel(fpath, upload_id, org_id, db)
+                all_items.extend(items)
+                file_names.append(f"{basename} (Excel, {len(items)} items extracted)")
 
             elif lower.endswith((".doc", ".docx")):
                 items, warnings = extract_from_docx(fpath, upload_id, org_id, db)

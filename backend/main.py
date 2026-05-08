@@ -126,7 +126,7 @@ def _validate_password(password: str) -> None:
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
-ALLOWED_EXTENSIONS = {".csv", ".pdf", ".zip", ".doc", ".docx"}
+ALLOWED_EXTENSIONS = {".csv", ".pdf", ".zip", ".doc", ".docx", ".xlsx", ".xls"}
 
 
 def _safe_org_folder(org: Organization) -> str:
@@ -353,7 +353,7 @@ async def upload_report(
         if ext not in ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type: {ext}. Allowed: CSV, PDF, ZIP",
+                detail=f"Unsupported file type: {ext}. Allowed: CSV, PDF, Excel, ZIP",
             )
 
         dest = os.path.join(report_dir, file.filename)
