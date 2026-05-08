@@ -166,6 +166,9 @@ def validate_csv_columns(content: bytes) -> None:
 # --- Organization endpoints ---
 @app.post("/orgs", response_model=OrgResponse)
 def create_organization(org: OrgCreate, db: Session = Depends(get_db)):
+    existing = db.query(Organization).filter(Organization.name == org.name).first()
+    if existing:
+        return existing
     db_org = Organization(
         name=org.name,
         industry=org.industry,
