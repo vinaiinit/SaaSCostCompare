@@ -57,6 +57,60 @@ def _parse_date(val) -> date | None:
     return None
 
 
+def _repair_json(text: str) -> str:
+    """Attempt to repair truncated or malformed JSON from AI responses."""
+    text = text.strip()
+    # Strip markdown fences
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:])
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+    # Find the outermost JSON array
+    start = text.find("[")
+    if start == -1:
+        return text
+    text = text[start:]
+
+    # Try parsing as-is first
+    try:
+        json.loads(text)
+        return text
+    except json.JSONDecodeError:
+        pass
+
+    # Truncated response: find the last complete object "}" and close the array
+    last_brace = text.rfind("}")
+    if last_brace > 0:
+        truncated = text[:last_brace + 1]
+        # Remove any trailing comma before closing
+        truncated = truncated.rstrip().rstrip(",")
+        candidate = truncated + "]"
+        try:
+            json.loads(candidate)
+            print(f"JSON repaired: truncated at position {last_brace + 1}, recovered partial array")
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+    # Try removing the last incomplete object
+    # Find second-to-last "}" which ends the previous complete object
+    second_last = text.rfind("}", 0, last_brace)
+    if second_last > 0:
+        truncated = text[:second_last + 1].rstrip().rstrip(",")
+        candidate = truncated + "]"
+        try:
+            json.loads(candidate)
+            print(f"JSON repaired: dropped last incomplete object, recovered up to position {second_last + 1}")
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+    return text
+
+
 def _normalize_billing_frequency(raw: str) -> str:
     """Map various billing frequency strings to canonical values."""
     if not raw:
@@ -354,7 +408,7 @@ CONTRACT TEXT:
         try:
             message = client.messages.create(
                 model="claude-sonnet-4-6",
-                max_tokens=4096,
+                max_tokens=8192,
                 messages=[{"role": "user", "content": prompt}],
             )
             break
@@ -369,13 +423,7 @@ CONTRACT TEXT:
 
     try:
         response_text = message.content[0].text.strip()
-
-        # Strip markdown code fences if present
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            response_text = "\n".join(lines[1:])
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
+        response_text = _repair_json(response_text)
 
         parsed = json.loads(response_text)
         if not isinstance(parsed, list):
@@ -494,7 +542,7 @@ def _try_pdf_document_extraction(file_path: str, upload_id: str, org_id: int, db
             try:
                 message = client.messages.create(
                     model="claude-sonnet-4-6",
-                    max_tokens=4096,
+                    max_tokens=8192,
                     messages=[{
                         "role": "user",
                         "content": [
@@ -584,7 +632,7 @@ def _try_pdf_image_extraction(file_path: str, upload_id: str, org_id: int, db: S
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[{"role": "user", "content": content}],
         )
 
@@ -645,7 +693,7 @@ def _try_pdf_pdfplumber_image_extraction(file_path: str, upload_id: str, org_id:
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[{"role": "user", "content": content}],
         )
 
@@ -666,13 +714,7 @@ def _parse_ai_response_to_items(
     response_text: str, upload_id: str, org_id: int, db: Session, source: str
 ) -> list[ContractLineItem]:
     """Parse Claude's JSON response into ContractLineItem objects."""
-    response_text = response_text.strip()
-
-    if response_text.startswith("```"):
-        lines = response_text.split("\n")
-        response_text = "\n".join(lines[1:])
-        if response_text.endswith("```"):
-            response_text = response_text[:-3]
+    response_text = _repair_json(response_text)
 
     parsed = json.loads(response_text)
     if not isinstance(parsed, list):
