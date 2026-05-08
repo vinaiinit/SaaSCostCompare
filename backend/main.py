@@ -168,7 +168,10 @@ def validate_csv_columns(content: bytes) -> None:
 def create_organization(org: OrgCreate, db: Session = Depends(get_db)):
     existing = db.query(Organization).filter(Organization.name == org.name).first()
     if existing:
-        return existing
+        raise HTTPException(
+            status_code=409,
+            detail=f"Organisation '{org.name}' already exists. If you are part of this organisation, please ask an existing member for the login details, or use a different organisation name.",
+        )
     db_org = Organization(
         name=org.name,
         industry=org.industry,

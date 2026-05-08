@@ -40,7 +40,11 @@ export default function Register() {
       setStep(2);
     } catch (err) {
       console.error('Org creation error:', err);
-      setError(err.response?.data?.detail || err.message || 'Failed to create organization.');
+      if (err.response?.status === 409) {
+        setError(err.response.data.detail + ' You can sign in from the login page.');
+      } else {
+        setError(err.response?.data?.detail || err.message || 'Failed to create organization.');
+      }
     } finally {
       setLoading(false);
     }
