@@ -314,7 +314,7 @@ export default function Campaign() {
                     )}
                     <input
                       type="file"
-                      accept=".csv,.pdf,.zip,.doc,.docx"
+                      accept=".csv,.pdf,.zip,.doc,.docx,.xlsx,.xls"
                       multiple
                       onChange={(e) => setFiles(e.target.files)}
                       className="hidden"

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authAPI, reportAPI, licenseAPI } from '../api';
+import useGoogleDrivePicker from '../hooks/useGoogleDrivePicker';
 
 const formatDate = (s) => {
   if (!s) return '—';
@@ -19,6 +20,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [vendorName, setVendorName] = useState('');
+  const { openPicker, loading: driveLoading } = useGoogleDrivePicker();
 
   const VENDORS = [
     'Microsoft (M365/Azure)',
@@ -73,6 +75,26 @@ export default function Dashboard() {
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleGoogleDrivePick = () => {
+    if (!vendorName) {
+      alert('Please select a vendor before uploading.');
+      return;
+    }
+    openPicker(async (files) => {
+      if (!files || files.length === 0) return;
+      setUploading(true);
+      try {
+        const response = await reportAPI.upload(files, vendorName.trim());
+        setReports([response.data, ...reports]);
+        setVendorName('');
+      } catch (err) {
+        alert('Upload failed: ' + (err.response?.data?.detail || 'Unknown error'));
+      } finally {
+        setUploading(false);
+      }
+    });
   };
 
   if (loading) {
@@ -135,7 +157,7 @@ export default function Dashboard() {
             <div className="mb-5 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
               <p className="font-semibold mb-1">Supported formats</p>
               <p><strong>CSV:</strong> Use the template with columns: <span className="font-mono text-xs">vendor, product_name, sku, quantity, unit_price, total_cost, billing_frequency, currency</span>.</p>
-              <p className="mt-1"><strong>PDF / Word:</strong> Upload contract documents, invoices, or pricing schedules (.pdf, .doc, .docx).</p>
+              <p className="mt-1"><strong>PDF / Word / Excel:</strong> Upload contract documents, invoices, or pricing schedules (.pdf, .doc, .docx, .xlsx, .xls).</p>
               <p className="mt-1"><strong>ZIP:</strong> Bundle multiple CSV, PDF, and Word files into a single archive.</p>
             </div>
 
@@ -179,12 +201,12 @@ export default function Dashboard() {
                       : 'Select a vendor above to upload'}
                   </p>
                   <p className="text-sm text-slate-600 mt-2">
-                    CSV, PDF, Word, or ZIP &middot; Select one or multiple files &middot; Max 50MB total
+                    CSV, PDF, Word, Excel, or ZIP &middot; Select one or multiple files &middot; Max 50MB total
                   </p>
                 </div>
                 <input
                   type="file"
-                  accept=".csv,.pdf,.zip,.doc,.docx"
+                  accept=".csv,.pdf,.zip,.doc,.docx,.xlsx,.xls"
                   multiple
                   onChange={handleFileUpload}
                   disabled={uploading || !vendorName}
@@ -192,6 +214,33 @@ export default function Dashboard() {
                 />
               </label>
             </div>
+
+            <div className="flex items-center gap-4 my-4">
+              <div className="flex-1 border-t border-slate-200"></div>
+              <span className="text-sm text-slate-400">or</span>
+              <div className="flex-1 border-t border-slate-200"></div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleDrivePick}
+              disabled={uploading || driveLoading || !vendorName}
+              className={`w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg border text-sm font-medium transition ${
+                vendorName
+                  ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:border-primary-400'
+                  : 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed opacity-60'
+              }`}
+            >
+              <svg className="w-5 h-5" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066DA"/>
+                <path d="M43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L3.45 44.7c-.8 1.4-1.2 2.95-1.2 4.5h27.5L43.65 25z" fill="#00AC47"/>
+                <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75L84.3 60.2c.8-1.4 1.2-2.95 1.2-4.5H58.05L63.5 67l10.05 9.8z" fill="#EA4335"/>
+                <path d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832D"/>
+                <path d="M58.05 55.7h27.5c0-1.55-.4-3.1-1.2-4.5L60.7 7.5c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l14.4 30.7z" fill="#2684FC"/>
+                <path d="M29.75 49.2L15.5 25.4c-.8 1.4-1.2 2.95-1.2 4.5l.01 19.3h15.44z" fill="#00AC47"/>
+              </svg>
+              {driveLoading ? 'Connecting to Google Drive...' : 'Import from Google Drive'}
+            </button>
           </div>
         </div>
 
@@ -239,6 +288,9 @@ function ReportCard({ report }) {
       try {
         const res = await reportAPI.getReportStatus(report.id);
         setStatus(res.data);
+        if (res.data.payment_status) {
+          setPaymentStatus(res.data.payment_status);
+        }
       } catch {}
     })();
   }, [report.id]);
@@ -683,6 +735,12 @@ function ComparisonPanel({ data }) {
           <p className="text-xs text-slate-500 mb-1">Data Coverage</p>
           <p className="text-lg font-bold text-amber-700">{summary.coverage_pct}%</p>
         </div>
+        {summary.avg_discount_pct != null && (
+          <div className="bg-orange-50 rounded-lg p-3 text-center">
+            <p className="text-xs text-slate-500 mb-1">Avg Discount off List</p>
+            <p className="text-lg font-bold text-orange-700">{summary.avg_discount_pct}%</p>
+          </div>
+        )}
       </div>
 
       {/* Assessment Breakdown */}
@@ -704,7 +762,9 @@ function ComparisonPanel({ data }) {
           <thead>
             <tr className="bg-slate-50 text-left">
               <th className="px-3 py-2 font-medium text-slate-600">Vendor / Product</th>
+              <th className="px-3 py-2 font-medium text-slate-600 text-right">List Price</th>
               <th className="px-3 py-2 font-medium text-slate-600 text-right">Your Cost</th>
+              <th className="px-3 py-2 font-medium text-slate-600 text-right">Discount</th>
               <th className="px-3 py-2 font-medium text-slate-600 text-right">Peer Median</th>
               <th className="px-3 py-2 font-medium text-slate-600 text-right">Percentile</th>
               <th className="px-3 py-2 font-medium text-slate-600">Assessment</th>
@@ -718,7 +778,22 @@ function ComparisonPanel({ data }) {
                   <span className="font-medium text-slate-900">{item.vendor_name}</span>
                   <span className="text-slate-500 ml-1">{item.product_name}</span>
                 </td>
+                <td className="px-3 py-2 text-right text-slate-500">
+                  {item.list_price_annual ? formatCurrency(item.list_price_annual) : '—'}
+                </td>
                 <td className="px-3 py-2 text-right text-slate-900">{formatCurrency(item.user_unit_cost_annual)}</td>
+                <td className="px-3 py-2 text-right">
+                  {item.discount_pct != null ? (
+                    <span className={`font-medium ${
+                      item.discount_pct < 0 ? 'text-red-600' :
+                      item.discount_pct >= 30 ? 'text-green-700' :
+                      item.discount_pct >= 15 ? 'text-emerald-600' :
+                      'text-amber-600'
+                    }`}>
+                      {item.discount_pct}%
+                    </span>
+                  ) : '—'}
+                </td>
                 <td className="px-3 py-2 text-right text-slate-700">
                   {item.has_sufficient_peers ? formatCurrency(item.peer_median) : '—'}
                 </td>
