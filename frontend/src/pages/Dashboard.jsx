@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authAPI, reportAPI, licenseAPI } from '../api';
-import useGoogleDrivePicker from '../hooks/useGoogleDrivePicker';
+
 
 const formatDate = (s) => {
   if (!s) return '—';
@@ -20,7 +20,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [vendorName, setVendorName] = useState('');
-  const { openPicker, loading: driveLoading } = useGoogleDrivePicker();
+
 
   const VENDORS = [
     'Microsoft (M365/Azure)',
@@ -77,25 +77,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleGoogleDrivePick = () => {
-    if (!vendorName) {
-      alert('Please select a vendor before uploading.');
-      return;
-    }
-    openPicker(async (files) => {
-      if (!files || files.length === 0) return;
-      setUploading(true);
-      try {
-        const response = await reportAPI.upload(files, vendorName.trim());
-        setReports([response.data, ...reports]);
-        setVendorName('');
-      } catch (err) {
-        alert('Upload failed: ' + (err.response?.data?.detail || 'Unknown error'));
-      } finally {
-        setUploading(false);
-      }
-    });
-  };
 
   if (loading) {
     return (
@@ -215,32 +196,6 @@ export default function Dashboard() {
               </label>
             </div>
 
-            <div className="flex items-center gap-4 my-4">
-              <div className="flex-1 border-t border-slate-200"></div>
-              <span className="text-sm text-slate-400">or</span>
-              <div className="flex-1 border-t border-slate-200"></div>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleGoogleDrivePick}
-              disabled={uploading || driveLoading || !vendorName}
-              className={`w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg border text-sm font-medium transition ${
-                vendorName
-                  ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:border-primary-400'
-                  : 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed opacity-60'
-              }`}
-            >
-              <svg className="w-5 h-5" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
-                <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066DA"/>
-                <path d="M43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L3.45 44.7c-.8 1.4-1.2 2.95-1.2 4.5h27.5L43.65 25z" fill="#00AC47"/>
-                <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75L84.3 60.2c.8-1.4 1.2-2.95 1.2-4.5H58.05L63.5 67l10.05 9.8z" fill="#EA4335"/>
-                <path d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832D"/>
-                <path d="M58.05 55.7h27.5c0-1.55-.4-3.1-1.2-4.5L60.7 7.5c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l14.4 30.7z" fill="#2684FC"/>
-                <path d="M29.75 49.2L15.5 25.4c-.8 1.4-1.2 2.95-1.2 4.5l.01 19.3h15.44z" fill="#00AC47"/>
-              </svg>
-              {driveLoading ? 'Connecting to Google Drive...' : 'Import from Google Drive'}
-            </button>
           </div>
         </div>
 
