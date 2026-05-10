@@ -71,7 +71,8 @@ export default function Dashboard() {
       e.target.value = '';
       setVendorName('');
     } catch (err) {
-      alert('Upload failed: ' + (err.response?.data?.detail || 'Unknown error'));
+      const detail = err.response?.data?.detail || err.message || 'Unknown error';
+      alert('Upload failed: ' + detail);
     } finally {
       setUploading(false);
     }
